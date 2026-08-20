@@ -13,7 +13,27 @@ Date：
 #include "asm/cpu.h"
 
 
-#if defined(__GNUC__)
+#if defined(JL_CLION_INDEX)
+
+/*
+ * The host compiler used by CLion cannot emit q32s sections. Keep these
+ * storage attributes out of the IDE-only translation model.
+ */
+#define SEC_USED(x)
+#define SEC(x)
+#define sec(x)
+#define AT(x)
+#define SET(x)
+#define ALIGNED(x)
+#define _GNU_PACKED_
+#define _NOINLINE_
+#define _INLINE_
+#define _WEAK_
+#define _WEAKREF_
+#define _NORETURN_
+#define _NAKED_
+
+#elif defined(__GNUC__)
 
 ///<locate code to x segment ever exist
 #define SEC_USED(x)     __attribute__((section(#x),used))
@@ -162,6 +182,5 @@ void delay_us(unsigned int);
 
 
 #endif
-
 
 

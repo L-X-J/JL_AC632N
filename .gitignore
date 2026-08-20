@@ -56,3 +56,7 @@ filenametags
 cscope.out
 *.bc
 *.ufw
+
+# Local IDE and CMake state
+.idea/
+cmake-build-*/

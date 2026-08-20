@@ -64,8 +64,49 @@ SDK 同时支持Codeblock 和 Make 编译环境，请确保编译前已经搭建
 * Makefile 编译 : 双击`tools/make_prompt.bat`，输入 `make target`（具体`target`的名字，参考`Makefile`开头的注释）
 
   `在编译下载代码前，请确保USB 升级工具正确连接并且进入编程模式`
-  
+
 * 蓝牙OTA : [OTA](https://doc.zh-jieli.com/AC63/zh-cn/master/module_demo/ota/index.html) , 适用领域：单备份，双备份蓝牙升级
+
+## CLion 开发与代码索引
+
+### 模块职责
+
+当前工程由根级 Makefile 编排固件构建，`apps/spp_and_le` 提供 SPP/LE 应用入口与协议业务，`apps/common` 提供公共组件，`cpu/bd19` 提供 AC632N 的芯片适配，`include_lib` 提供 SDK 接口。根目录 `CMakeLists.txt` 仅用于让 CLion 建立代码索引，不替代固件 Makefile。
+
+### 目录结构
+
+```text
+apps/
+  spp_and_le/       SPP/LE 应用、配置、模块和示例
+  common/           跨应用公共组件
+cpu/bd19/           AC632N 芯片与外设实现
+include_lib/        SDK、驱动和协议栈头文件
+tools/              构建后处理与下载工具
+Makefile            固件目标编排
+CMakeLists.txt      CLion 索引入口
+CMakePresets.json   CLion CMake 配置预设
+AGENT.md            架构约束真相源
+```
+
+### 数据流与模块边界
+
+源码由 `apps/spp_and_le/app_main.c` 进入应用流程，应用通过 `apps/common` 调用 SDK 接口与 `cpu/bd19` 硬件能力；板级 Makefile 注入 AC632N 宏、头文件路径和源文件列表，随后完成编译、链接和下载。CMake 索引目标只读取同一目标的源码、宏和头文件路径，固件产物仍由 `make ac632n_spp_and_le` 生成。
+
+### 在 CLion 中打开
+
+1. 关闭当前 Makefile Project，用 CLion 打开仓库根目录，不要单独打开 `apps/spp_and_le/app_main.c`。
+2. 在 CMake Profiles 中选择 `clion-ac632n-index`；如果当前窗口仍显示 Makefile Project，关闭项目后重新打开根目录，让 CLion 重新加载 `CMakePresets.json`。
+3. 索引目标名称为 `ac632n_spp_and_le_indexing`；如果本地已有旧的 Makefile 工程元数据，只需删除 `.idea/misc.xml` 后重新打开项目，不要删除源码或构建产物。
+4. 如果本机安装了杰理工具链，将 `JL_EXTERNAL_INCLUDE_DIR` 指向 q32s 的 include 目录；Linux 默认探测 `/opt/jieli/q32s/include`，Windows 可使用 `C:/JL/pi32/q32s-include`。
+5. 代码索引完成后，函数跳转、头文件解析和宏展开按 AC632N bd19 配置工作；固件构建使用 CMake 目标 `firmware_ac632n_spp_and_le` 或根级 Makefile。
+
+### 扩展方式与禁止事项
+
+- 新增应用逻辑放入对应 `apps/<application>`，新增芯片逻辑放入对应 `cpu/<chip>`，并同步板级 Makefile。
+- 只有稳定且确实跨应用复用的能力才可放入 `apps/common`。
+- 禁止在 CMake 中复制链接脚本、库列表或固件业务逻辑。
+- 禁止混用不同芯片的 include 目录和配置宏，禁止循环依赖、上帝文件和万能 utils。
+- 详细架构边界与演进规则见 [AGENT.md](./AGENT.md)。
 
 蓝牙官方认证
 -------------

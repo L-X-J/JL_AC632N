@@ -1,0 +1,15 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "clion-ac632n-index",
+      "displayName": "CLion AC632N index",
+      "description": "Configure the AC632N bd19 source model for CLion navigation.",
+      "binaryDir": "${sourceDir}/cmake-build-clion",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    }
+  ]
+}
