@@ -8,7 +8,7 @@ Codex 在任何代码生成前必须读取 AGENT.md 并严格遵守其中的架�
 
 本项目是杰理 AC63 系列嵌入式 SDK，固件构建由根级 Makefile 编排，各应用通过板级 Makefile 选择芯片、宏定义、头文件和源文件。
 
-- **Interface / Application**：`apps/spp_and_le`、`apps/hid`、`apps/mesh`，负责应用入口、协议业务和用户配置。
+- **Interface / Application**：`apps/spp_and_le`、`apps/rider_core_temp`、`apps/hid`、`apps/mesh`，负责应用入口、协议业务和用户配置。
 - **Component / Common**：`apps/common`，负责跨应用复用的设备、升级、音频和第三方协议组件。
 - **Platform / CPU**：`cpu/<chip>`，负责芯片相关外设、音频、启动和链接脚本输入。
 - **Library / SDK**：`include_lib`，提供 SDK、驱动和协议栈的公开头文件及预编译库接口。
@@ -40,6 +40,8 @@ Codex 在任何代码生成前必须读取 AGENT.md 并严格遵守其中的架�
 3. 新增 CLion 索引配置时，只扩展 CMake 的 IDE 目标或 Preset，不改变 Makefile 的固件语义。
 4. 涉及目录、分层或依赖变化时，必须同步本文件、根 README 和相关模块说明。
 5. 每次扩展都应确认依赖方向为应用 → 公共组件 → CPU/SDK，禁止反向依赖。
+
+Rider CoreTemp 的产品协议、温度算法和 PB7 传感器适配必须留在 `apps/rider_core_temp`；不得把产品 UUID、温度状态或 M601 时序移入 `apps/common` 或 `cpu/bd19`。
 
 ## 代码复用与注释
 

@@ -45,6 +45,8 @@ AC63 系列通用蓝牙SDK 固件程序
 
 * 蓝牙应用 : [SPP_LE](./apps/spp_and_le), 适用领域：透传, 数传, 扫描设备, 广播设备, 信标, FindMy应用, 多机连接. Dongle(usb / bt). [文档链接](https://doc.zh-jieli.com/AC63/zh-cn/master/module_demo/spple/index.html)
 
+* 蓝牙应用 : [Rider CoreTemp](./apps/rider_core_temp)，AC632N 单 BLE 外设，用于 PB7 上的 M601 温度采集和 CORE 兼容协议广播。
+
 * 蓝牙应用 : [HID](./apps/hid), 适用领域：遥控器, 自拍器, 键盘, 鼠标, 吃鸡王座, 语音遥控器. [文档链接](https://doc.zh-jieli.com/AC63/zh-cn/master/module_demo/hid/index.html)
 
 * 蓝牙应用 : [Mesh](./apps/mesh), 适用领域：物联网节点, 天猫精灵接入, 自组网应用. [文档链接](https://doc.zh-jieli.com/AC63/zh-cn/master/module_demo/mesh/index.html)
@@ -78,6 +80,7 @@ SDK 同时支持Codeblock 和 Make 编译环境，请确保编译前已经搭建
 ```text
 apps/
   spp_and_le/       SPP/LE 应用、配置、模块和示例
+  rider_core_temp/  Rider 核心温度 BLE 外设应用
   common/           跨应用公共组件
 cpu/bd19/           AC632N 芯片与外设实现
 include_lib/        SDK、驱动和协议栈头文件
@@ -90,13 +93,13 @@ AGENT.md            架构约束真相源
 
 ### 数据流与模块边界
 
-源码由 `apps/spp_and_le/app_main.c` 进入应用流程，应用通过 `apps/common` 调用 SDK 接口与 `cpu/bd19` 硬件能力；板级 Makefile 注入 AC632N 宏、头文件路径和源文件列表，随后完成编译、链接和下载。CMake 索引目标只读取同一目标的源码、宏和头文件路径，固件产物仍由 `make ac632n_spp_and_le` 生成。
+源码由对应应用的 `app_main.c` 进入流程：SPP_LE 使用 `apps/spp_and_le`，Rider CoreTemp 使用 `apps/rider_core_temp`。应用通过 `apps/common` 调用 SDK 接口与 `cpu/bd19` 硬件能力；板级 Makefile 注入 AC632N 宏、头文件路径和源文件列表，随后完成编译、链接和下载。CMake 索引目标只读取同一目标的源码、宏和头文件路径，固件产物仍分别由 `make ac632n_spp_and_le` 或 `make ac632n_rider_core_temp` 生成。
 
 ### 在 CLion 中打开
 
 1. 关闭当前 Makefile Project，用 CLion 打开仓库根目录，不要单独打开 `apps/spp_and_le/app_main.c`。
 2. 在 CMake Profiles 中选择 `clion-ac632n-index`；如果当前窗口仍显示 Makefile Project，关闭项目后重新打开根目录，让 CLion 重新加载 `CMakePresets.json`。
-3. 索引目标名称为 `ac632n_spp_and_le_indexing`；如果本地已有旧的 Makefile 工程元数据，只需删除 `.idea/misc.xml` 后重新打开项目，不要删除源码或构建产物。
+3. SPP_LE 索引目标名称为 `ac632n_spp_and_le_indexing`，Rider 索引目标名称为 `ac632n_rider_core_temp_indexing`；如果本地已有旧的 Makefile 工程元数据，只需删除 `.idea/misc.xml` 后重新打开项目，不要删除源码或构建产物。
 4. 如果本机安装了杰理工具链，将 `JL_EXTERNAL_INCLUDE_DIR` 指向 q32s 的 include 目录；Linux 默认探测 `/opt/jieli/q32s/include`，Windows 可使用 `C:/JL/pi32/q32s-include`。
 5. 代码索引完成后，函数跳转、头文件解析和宏展开按 AC632N bd19 配置工作；固件构建使用 CMake 目标 `firmware_ac632n_spp_and_le` 或根级 Makefile。
 
@@ -107,6 +110,10 @@ AGENT.md            架构约束真相源
 - 禁止在 CMake 中复制链接脚本、库列表或固件业务逻辑。
 - 禁止混用不同芯片的 include 目录和配置宏，禁止循环依赖、上帝文件和万能 utils。
 - 详细架构边界与演进规则见 [AGENT.md](./AGENT.md)。
+
+### Rider CoreTemp 固件
+
+进入 `apps/rider_core_temp` 后，可使用 `make ac632n_rider_core_temp` 构建独立固件。应用只启用 BLE 外设角色，设备名固定为 `ICXL-CoreTemp-Rider`；PB7 由 `modules/temp/m601_1wire.c` 独占，BLE profile 和广播由 `modules/bt/core_temp_gatt.c` 提供。协议字段、温度帧和 Control Point 约束见 [CORE2 BLE 协议说明](./doc/ICXL-CoreTemp-Ride/CORE2_BLE_协议说明.md)。
 
 蓝牙官方认证
 -------------

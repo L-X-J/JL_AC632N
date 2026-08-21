@@ -1,0 +1,296 @@
+# CORE 2 核心温度传感器 BLE 协议说明
+
+> 适用对象：CORE / CORE 2 核心体温传感器。本文依据 CORE 官方公开的 BLE GATT 服务规范（CoreTemp Service Specification V2.2）及连接实现说明（Connectivity Implementation Notes V3.3）整理。
+
+## 1. 接入结论
+
+CORE 2 通过 BLE 提供三种获取核心体温的方式：
+
+1. **CORE 自定义 Core Body Temperature Service（推荐）**：可获取核心温度、皮肤温度、数据质量、心率和 Heat Strain Index（HSI）。
+2. **标准 Health Thermometer Service**：仅需兼容标准体温计协议或仅显示核心温度的码表可使用。
+3. **广播 Manufacturer Specific Data**：无需连接，适合低功耗快速显示；仅能取得广播中的核心温度和设备状态。
+
+若码表需要最完整、最稳定的数据，应连接设备并订阅自定义温度特征 `00002101-5B1E-4347-B07C-97B514DAE121`。
+
+## 2. BLE 扫描与设备识别
+
+### 2.1 推荐扫描筛选条件
+
+优先在广播或主动扫描响应（Scan Response）中筛选下列 128-bit Service UUID：
+
+```text
+00002100-5B1E-4347-B07C-97B514DAE121
+```
+
+这是公开的 **Core Body Temperature Service**。
+
+为兼容旧版本固件，也可同时接受以下旧私有服务 UUID：
+
+```text
+00004200-F366-40B2-AC37-70CCE0AA83B1
+```
+
+设备名通常为 `CORE`（可能随设备状态附带后缀），但不建议只通过设备名识别。
+
+### 2.2 广播内容
+
+常见 Advertisement Data：
+
+| AD Type | 内容 |
+|---|---|
+| `0x01` | GAP Flags，示例 `0x06` |
+| `0x03` | 16-bit UUID 列表，包含 Health Thermometer Service `0x1809` |
+| `0x09` | Complete Local Name，通常为 `CORE` |
+| `0xFF` | Manufacturer Specific Data，携带 beacon 核心温度 |
+
+自定义 CoreTemp Service 的 128-bit UUID 主要出现在主动扫描响应中；因此扫描端应采用 **active scan**。
+
+## 3. GATT 服务总览
+
+| 服务 | UUID | 用途 |
+|---|---|---|
+| Core Body Temperature Service | `00002100-5B1E-4347-B07C-97B514DAE121` | CORE 自定义完整温度数据服务 |
+| Health Thermometer Service | `0x1809` | 标准体温计服务，仅核心温度 |
+| Battery Service | `0x180F` | 电池电量 |
+| Device Information Service | `0x180A` | 型号、厂商等设备信息 |
+| Generic Access / Attribute | `0x1800` / `0x1801` | BLE 基础服务 |
+
+所有多字节数值均按 **Little Endian（小端序）**传输。
+
+## 4. 自定义 Core Body Temperature Service
+
+### 4.1 特征（Characteristics）
+
+| 特征 | UUID | 属性 | 用途 |
+|---|---|---|---|
+| Core Body Temperature | `00002101-5B1E-4347-B07C-97B514DAE121` | Read, Notify | 实时温度及附加指标 |
+| CoreTemp Control Point | `00002102-5B1E-4347-B07C-97B514DAE121` | Write, Indicate | 心率设备管理、外部心率输入 |
+
+### 4.2 订阅实时温度
+
+向温度特征的 CCCD（UUID `0x2902`）写入：
+
+```text
+01 00
+```
+
+表示启用 Notification。随后设备会通过 `...2101` 推送温度帧。
+
+关闭通知则写：
+
+```text
+00 00
+```
+
+### 4.3 温度通知帧格式
+
+温度帧是**变长帧**。核心温度字段始终存在；其余字段是否存在由 Flags 指定。
+
+```text
+Offset  长度  字段
+0       1     Flags
+1       2     Core Body Temperature（SINT16，始终存在）
+3       2     Skin Temperature（Flags.bit0 = 1 时有效）
+5       2     Core Reserved（Flags.bit1 = 1 时有效）
+7       1     Quality & State（Flags.bit2 = 1 时有效）
+8       1     Heart Rate（Flags.bit4 = 1 时有效）
+9       1     Heat Strain Index（Flags.bit5 = 1 时有效）
+```
+
+> 上表为所有可选字段均存在时的偏移。解析时必须按 Flags 从前向后移动游标，不能假设固定长度。
+
+#### Flags 定义
+
+| Bit | 名称 | 0 | 1 |
+|---:|---|---|---|
+| 0 | Skin Temperature | 无有效值 | 皮肤温度有效 |
+| 1 | Core Reserved | 无有效值 | 保留内部数值有效 |
+| 2 | Quality and State | 无有效值 | 质量与状态有效 |
+| 3 | Temperature Unit | °C | °F |
+| 4 | Heart Rate | 无有效值 | 心率有效 |
+| 5 | Heat Strain Index | 无有效值 | HSI 有效 |
+| 6–7 | RFU | 必须为 0 | — |
+
+#### 字段换算
+
+| 字段 | 类型 | 解析方式 |
+|---|---|---|
+| Core Body Temperature | `SINT16` LE | 数值 ÷ 100；单位由 Flags.bit3 决定 |
+| Skin Temperature | `SINT16` LE | 数值 ÷ 100；单位同核心温度 |
+| Core Reserved | `SINT16` LE | 内部保留字段；码表一般可忽略 |
+| Heart Rate | `UINT8` | BPM；值 `0` 表示当前没有心率信号 |
+| Heat Strain Index | `UINT8` | 数值 ÷ 10，范围约 `0.0`–`25.4` |
+
+核心温度为 `0x7FFF`（十进制 `32767`）时，表示 **Data not available**，不得将其换算为正常温度。
+
+#### Quality & State 字段
+
+低 4 位是 Data Quality：
+
+| 值 | 含义 |
+|---:|---|
+| `0` | Invalid |
+| `1` | Poor |
+| `2` | Fair |
+| `3` | Good |
+| `4` | Excellent |
+| `7` | N/A |
+
+高半字节中，bits 4–5 是心率关联状态：
+
+| bits 5–4 | 含义 |
+|---:|---|
+| `00` | 不支持心率配对 |
+| `01` | 支持心率，但未接收到心率信号 |
+| `10` | 支持心率，正在接收心率信号 |
+| `11` | N/A |
+
+bits 3、6–7 为保留位，应为 0。
+
+### 4.4 通知示例
+
+完整字段示例帧：
+
+```text
+37 19 0F C2 0D 2F 00 11 00 27
+```
+
+解析结果：
+
+| 字段 | 值 |
+|---|---|
+| Flags | `0x37`：皮温、保留值、质量状态、心率、HSI 均有效；单位 °C |
+| 核心温度 | `0x0F19` = `3865` → **38.65 °C** |
+| 皮肤温度 | `0x0DC2` = `3522` → **35.22 °C** |
+| Core Reserved | `0x002F` = `47` |
+| Quality & State | `0x11`：Quality = Poor；支持心率但未收到信号 |
+| 心率 | `0` BPM |
+| HSI | `0x27` = `39` → **3.9** |
+
+## 5. 标准 Health Thermometer Service
+
+如果码表只实现 BLE SIG 标准 Health Thermometer Profile，可使用此服务。
+
+| 项目 | UUID | 说明 |
+|---|---|---|
+| Health Thermometer Service | `0x1809` | 标准服务 |
+| Temperature Measurement | `0x2A1C` | Notify；核心温度 |
+| Temperature Type | `0x2A1D` | CORE 值为 `0x02`（General） |
+
+### 5.1 Temperature Measurement 数据
+
+`0x2A1C` 使用标准 IEEE 11073-20601 32-bit FLOAT：
+
+```text
+Flags (1 byte) + Temperature value (4 bytes) + [可选字段]
+```
+
+CORE 的行为：
+
+- Flags.bit0：`0` 表示 Celsius；
+- Flags.bit1：`0`，不带时间戳；
+- Flags.bit2：`1`，携带 Temperature Type；
+- 无有效值时发送 IEEE 11073 NaN：`0x007FFFFF`；
+- 官方文档记录的典型通知间隔约为 **10 秒**，实际节奏可能受固件和测量状态影响。
+
+对于只需在码表显示当前核心温度的场景，此服务通常更容易接入；但它不带皮温、质量、HSI 等信息。
+
+## 6. Battery Service
+
+| 服务 | 特征 | 值格式 |
+|---|---|---|
+| `0x180F` Battery Service | `0x2A19` Battery Level | `UINT8`，范围 `0`–`100`，表示电量百分比 |
+
+## 7. 广播 Beacon 温度格式
+
+无需连接时，可从 AD Type `0xFF` 的 Manufacturer Specific Data 读取核心温度。
+
+```text
+Offset  长度  字段
+0       2     Manufacturer ID（uint16 LE，值 0xF60B）
+2       1     Manufacturer Data Version
+3       1     Status
+4       2     Beacon Temperature（uint16 LE，单位 0.001 °C）
+```
+
+示例：
+
+```text
+0B F6 00 04 B3 91
+```
+
+解析：
+
+- Manufacturer ID：`0xF60B`
+- Version：`0x00`
+- Status：`0x04`（正常测量/擦除状态；低 4 位为传感器状态机状态）
+- Beacon Temperature：`0x91B3` = `37299` → **37.299 °C**
+
+广播温度适合快速、低功耗的只读显示；需要注意它没有质量、皮温、HSI 等辅助信息，也不应替代连接后订阅的数据。
+
+## 8. Control Point：心率管理与外部心率输入
+
+Control Point UUID：
+
+```text
+00002102-5B1E-4347-B07C-97B514DAE121
+```
+
+使用前，先向其 CCCD 写入：
+
+```text
+02 00
+```
+
+以启用 **Indication**。客户端将请求写入该特征；设备完成操作后用 Indication 返回结果。一次操作未收到返回前，不应发送下一条命令。
+
+结果指示格式：
+
+```text
+80 <request_opcode> <result_code> [response_parameters...]
+```
+
+| Result Code | 含义 |
+|---:|---|
+| `0x01` | Success |
+| `0x02` | Op Code Not Supported |
+| `0x03` | Invalid Parameter |
+| `0x04` | Operation Failed |
+
+常用 OpCode：
+
+| OpCode | 命令 | 参数 |
+|---:|---|---|
+| `0x01` | 清空已配对 ANT+ 心率带 | 无 |
+| `0x02` / `0x03` | 添加 / 删除 ANT+ 心率带 | ANT+ ID + Tx type，共 3 字节 |
+| `0x04` | 获取已配对 ANT+ 心率带数量 | 无 |
+| `0x05` | 获取指定已配对 ANT+ 心率带 | index（1 字节） |
+| `0x06` / `0x07` | 添加 / 删除 BLE 心率带 | BLE 地址（6 字节） |
+| `0x08` | 获取已配对 BLE 心率带数量 | 无 |
+| `0x09` | 获取已配对 BLE 心率带名称和状态 | index（1 字节） |
+| `0x0A` | 扫描 ANT+ 心率带 | `FF` 扫描；`FE` 就近配对 |
+| `0x0B` / `0x0C` | 获取扫描到的 ANT+ 心率带数量 / 指定 ID | 无 / index |
+| `0x0D` | 扫描 BLE 心率带 | `FF` 扫描；`FE` 就近配对 |
+| `0x0E` | 获取扫描到的 BLE 心率带数量 | 无 |
+| `0x0F` / `0x10` | 获取扫描到的 BLE 心率带名称 / MAC | index |
+| `0x11` | 清空已配对 BLE 心率带 | 无 |
+| `0x12` | 获取已配对 BLE 心率带 MAC 和状态 | index |
+| `0x13` | 直接输入外部心率 | 1 字节 BPM；空参数表示停止外部输入 |
+
+外部心率输入例子：向 Control Point 写入 `13 A8`，表示将外部心率设为 `168 BPM`。若同一值持续超过约 15 秒未更新，设备可能降低核心温度输出的质量等级。
+
+## 9. 码表实现建议
+
+1. 主动扫描，按 `...2100` 服务 UUID 识别设备；同时兼容旧 UUID `...4200`。
+2. 连接后发现服务与特征，优先订阅 `...2101` 的 Notification。
+3. 每帧按 Flags 动态解析，特别处理 `0x7FFF` 核心温度无效值。
+4. 显示温度时优先采用核心温度；皮温、HSI 和质量字段仅在对应 flag 有效时显示。
+5. 如果只支持 BLE 标准体温服务，订阅 `0x1809 / 0x2A1C` 即可。
+6. 仅需要粗略实时数值、且不希望保持连接时，解析厂商广播数据中的 `Beacon Temperature`。
+7. 断连、空帧、RFU bits 非零或长度不足的帧应丢弃并记录诊断信息，不应将异常数据展示为体温。
+
+## 10. 参考资料
+
+- CORE 官方 GitHub：<https://github.com/CoreBodyTemp/CoreBodyTemp>
+- `CoreTemp BLE Service Specification.pdf`，V2.2，2024-07-04
+- `CORE Connectivity Implementation Notes.pdf`，V3.3，仓库最新公开版本
