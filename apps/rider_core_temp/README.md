@@ -79,6 +79,24 @@ PB7 (`IO_PORTB_07`) 由 M601 1-Wire 总线独占：
 make ac632n_rider_core_temp
 ```
 
+### Windows Workbench 构建和烧录
+
+Rider CoreTemp 的 bd19 Makefile 必须保留 `CONFIG_DATA_TRANS_CASE_ENABLE`。该宏让
+`cpu/bd19/tools/download.c` 生成标准的 `download/data_trans/download.bat` 调用；如果缺少它，
+构建仍可能成功并生成 `app.bin`，但 Windows 后处理脚本只会打包文件，不会真正写入开发板，
+Workbench 会显示“设备离线”。
+
+建议使用 Workbench CLI 验证完整链路：
+
+```sh
+ac632n-workbench-cli.exe build --project <project-dir> --target ac632n_rider_core_temp
+ac632n-workbench-cli.exe flash --project <project-dir>
+```
+
+烧录成功的日志应同时包含 `Online flash id`、`Write sector` 或 `Write block`，不能只看“已复制文件”。
+如果下载器在一次失败尝试后消失，重新插拔开发板或在 Workbench 点击 Update，确认出现 `USB 大容量存储设备`
+后再执行 `flash`。
+
 CLion 代码索引目标为 `ac632n_rider_core_temp_indexing`，固件链接仍由 `apps/rider_core_temp/board/bd19/Makefile` 负责。当前开发机若未安装杰理 q32s 工具链（`clang`、`lto-wrapper`、`lto-ar`），只能完成 Make dry-run、CMake 配置和主机侧语法/索引检查，不能声称固件已完成链接或可烧录。
 
 硬件验收必须至少覆盖：广播服务 UUID 和名称、连接/断连、温度与标准体温 CCCD、Control Point indication（连续写入应返回 busy）、无设备/CRC 错误、PB7 上拉和长线时序，以及 VBAT ADC/电池百分比阈值校准。

@@ -53,10 +53,13 @@ CFLAGS := \
 	-fms-extensions
 CXXFLAGS :=
 
+# Keep CONFIG_DATA_TRANS_CASE_ENABLE enabled: download.c uses it to select the
+# real Windows data-trans flash flow.
 DEFINES := \
 	-DSUPPORT_MS_EXTENSIONS \
 	-DCONFIG_RELEASE_ENABLE \
 	-DCONFIG_CPU_BD19 \
+	-DCONFIG_DATA_TRANS_CASE_ENABLE \
 	-DCONFIG_FREE_RTOS_ENABLE \
 	-DCONFIG_EQ_SUPPORT_ASYNC \
 	-DEQ_DESIGN_IN_MASK \
@@ -116,6 +119,7 @@ INCLUDES := \
 	-I../../../../apps/common/config/include \
 	-I../../../../apps/common/include \
 	-I../../../../apps/common/device \
+	-I../../../../apps/common/device/usb \
 	-I../../../../apps/common/third_party_profile/common \
 	-I../../../../apps/common/third_party_profile/jieli \
 	-I../../../../apps/common/third_party_profile/jieli/JL_rcsp \
@@ -243,10 +247,11 @@ clean:
 	$(QUIET) $(RM) $(OUT_ELF) $(BUILD_DIR)
 
 ifeq ($(LINK_AT),1)
+# The bundled Windows GNU Make 3.80 has no usable make file function.
 $(OUT_ELF): $(OBJS)
 	$(info +LINK $@)
 	$(shell $(MKDIR) $(@D))
-	$(file >$(OBJ_FILE), $(OBJS))
+	$(QUIET) echo $(OBJS) > $(OBJ_FILE)
 	$(QUIET) $(LD) -o $(OUT_ELF) @$(OBJ_FILE) $(LFLAGS) $(LIBPATHS) $(LIBS)
 else
 $(OUT_ELF): $(OBJS)

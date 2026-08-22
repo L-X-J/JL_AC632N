@@ -53,10 +53,13 @@ cd /d %~dp0
 
 set OBJDUMP=C:\JL\pi32\bin\llvm-objdump.exe
 set OBJCOPY=C:\JL\pi32\bin\llvm-objcopy.exe
+set OBJSIZEDUMP=C:\JL\pi32\bin\llvm-objsizedump.exe
 set INELF=sdk.elf
 set LZ4_PACKET=lz4_packet.exe
 
 ::@echo on
+
+setlocal EnableDelayedExpansion
 
 if exist sdk.elf (
 
@@ -71,14 +74,14 @@ if exist sdk.elf (
 %OBJCOPY% -O binary -j .common %INELF% common.bin
 
 
-bankfiles=
+set bankfiles=
 for /L %%i in (0,1,20) do (
  %OBJCOPY% -O binary -j .overlay_bank%%i %INELF% bank%%i.bin
  set bankfiles=!bankfiles! bank%%i.bin 0x0
 )
 
-echo %bank_files
-%LZ4_PACKET% -dict text.bin -input common.bin 0 %bankfiles% -o bank.bin
+echo !bankfiles!
+%LZ4_PACKET% -dict text.bin -input common.bin 0 !bankfiles! -o bank.bin
 
 %OBJDUMP% -section-headers -address-mask=0x1ffffff %INELF%
 %OBJSIZEDUMP% -lite -skip-zero -enable-dbg-info %INELF% > symbol_tbl.txt
@@ -88,13 +91,17 @@ copy /b text.bin+data.bin+data_code.bin+aec.bin+aac.bin+bank.bin+aptx.bin app.bi
 del bank*.bin common.bin text.bin data.bin bank.bin aac.bin aec.bin aptx.bin
 )
 
+endlocal
+
 #ifdef CONFIG_WATCH_CASE_ENABLE
 call download/watch/download.bat
 #elif defined(CONFIG_SOUNDBOX_CASE_ENABLE)
 call download/soundbox/download.bat
 #elif defined(CONFIG_EARPHONE_CASE_ENABLE)
 call download/earphone/download.bat
-#elif defined(CONFIG_HID_CASE_ENABLE) ||defined(CONFIG_SPP_AND_LE_CASE_ENABLE)||defined(CONFIG_MESH_CASE_ENABLE)||defined(CONFIG_DONGLE_CASE_ENABLE)    //数传
+rem Rider CoreTemp is a standalone data-trans target. Keep this branch aligned with
+rem the board Makefile; otherwise Windows only packages app.bin and never writes it.
+#elif defined(CONFIG_HID_CASE_ENABLE) ||defined(CONFIG_SPP_AND_LE_CASE_ENABLE)||defined(CONFIG_MESH_CASE_ENABLE)||defined(CONFIG_DONGLE_CASE_ENABLE)||defined(CONFIG_DATA_TRANS_CASE_ENABLE)    //数传
 call download/data_trans/download.bat
 #else
 //to do other case

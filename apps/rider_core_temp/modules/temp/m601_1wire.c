@@ -19,6 +19,32 @@
 #define RIDER_M601_VALIDATE_CRC         1
 #endif
 
+/* The bd19 SDK declares delay_us() but does not provide that symbol in the
+ * libraries used by this target.  Keep the timing primitive local to the
+ * product sensor driver and use the same timer path as the SDK charge driver. */
+extern const int set_to_close_timer0_delay;
+
+static void rider_delay_us(u32 usec)
+{
+    if (set_to_close_timer0_delay) {
+        JL_MCPWM->MCPWM_CON0 &= ~BIT(8 + 3);
+        JL_MCPWM->TMR3_CNT = 0;
+        JL_MCPWM->TMR3_PR = clk_get("lsb") / 1000000 * usec;
+        JL_MCPWM->TMR3_CON = BIT(10) | BIT(0);
+        JL_MCPWM->MCPWM_CON0 |= BIT(8 + 3);
+        while (!(JL_MCPWM->TMR3_CON & BIT(12)));
+        JL_MCPWM->TMR3_CON = BIT(10);
+        JL_MCPWM->MCPWM_CON0 &= ~BIT(8 + 3);
+    } else {
+        JL_TIMER0->CON = BIT(14);
+        JL_TIMER0->CNT = 0;
+        JL_TIMER0->PRD = clk_get("timer") / 1000000L * usec;
+        JL_TIMER0->CON = BIT(0) | BIT(2) | BIT(6);
+        while ((JL_TIMER0->CON & BIT(15)) == 0);
+        JL_TIMER0->CON = BIT(14);
+    }
+}
+
 static rider_temperature_sample_t rider_latest_sample;
 static u16 rider_conversion_timeout;
 static u8 rider_conversion_pending;
@@ -46,11 +72,11 @@ static u8 rider_1wire_reset_presence(void)
     u8 present;
 
     rider_1wire_drive_low();
-    delay_us(480);
+    rider_delay_us(480);
     rider_1wire_release();
-    delay_us(70);
+    rider_delay_us(70);
     present = (gpio_read(RIDER_M601_DQ_PORT) == 0);
-    delay_us(410);
+    rider_delay_us(410);
     return present;
 }
 
@@ -59,13 +85,13 @@ static void rider_1wire_write_bit(u8 value)
 {
     rider_1wire_drive_low();
     if (value) {
-        delay_us(2);
+        rider_delay_us(2);
         rider_1wire_release();
-        delay_us(68);
+        rider_delay_us(68);
     } else {
-        delay_us(60);
+        rider_delay_us(60);
         rider_1wire_release();
-        delay_us(10);
+        rider_delay_us(10);
     }
 }
 
@@ -75,11 +101,11 @@ static u8 rider_1wire_read_bit(void)
     u8 value;
 
     rider_1wire_drive_low();
-    delay_us(2);
+    rider_delay_us(2);
     rider_1wire_release();
-    delay_us(10);
+    rider_delay_us(10);
     value = (u8)(gpio_read(RIDER_M601_DQ_PORT) != 0);
-    delay_us(58);
+    rider_delay_us(58);
     return value;
 }
 
