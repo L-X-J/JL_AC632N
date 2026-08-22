@@ -6,6 +6,11 @@
 #include "le_common.h"
 #include "asm/adc_api.h"
 
+#define LOG_TAG_CONST       GATT_SERVER
+#define LOG_TAG             "[RIDER_GATT]"
+#define LOG_INFO_ENABLE
+#include "debug.h"
+
 #if CONFIG_APP_RIDER_CORE_TEMP
 
 #define RIDER_ADV_INTERVAL              (160 * 5)
@@ -54,13 +59,34 @@ static gatt_server_cfg_t rider_server_config = {
     .event_packet_handler = rider_event_packet_handler,
 };
 
+#if CONFIG_BT_SM_SUPPORT_ENABLE
+/*
+ * Dura may request an encrypted/bonded link after the LE connection.  Rider
+ * has no display or input path, so Just Works is the only unattended method;
+ * it provides encryption/bonding but cannot provide MITM authentication.
+ */
+static sm_cfg_t rider_sm_config = {
+    .slave_security_auto_req = 1,
+    .slave_set_wait_security = 0,
+    .io_capabilities = IO_CAPABILITY_NO_INPUT_NO_OUTPUT,
+    .authentication_req_flags = SM_AUTHREQ_BONDING,
+    .min_key_size = 7,
+    .max_key_size = 16,
+    .sm_cb_packet_handler = NULL,
+};
+#endif
+
 static gatt_ctrl_t rider_gatt_control_block = {
     .mtu_size = RIDER_ATT_MTU_SIZE,
     .cbuffer_size = RIDER_ATT_CBUFFER_SIZE,
     .multi_dev_flag = 0,
     .server_config = &rider_server_config,
     .client_config = NULL,
+#if CONFIG_BT_SM_SUPPORT_ENABLE
+    .sm_config = &rider_sm_config,
+#else
     .sm_config = NULL,
+#endif
     .hci_cb_packet_handler = NULL,
 };
 
@@ -497,7 +523,6 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
 {
     u16 handle;
 
-    (void)ext_param;
     switch (event) {
     case GATT_COMM_EVENT_CONNECTION_COMPLETE:
         if (packet && size >= 2) {
@@ -508,6 +533,18 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
             rider_cp_indication_in_flight = 0;
             rider_battery_level_valid = 0;
             rider_estimator_set_external_heart_rate(0, 0);
+        }
+        break;
+    case GATT_COMM_EVENT_ENCRYPTION_REQUEST:
+        /* The common server auto-confirms Just Works when this returns 0. */
+        log_info("Rider security request: handle=%04x process=%d\n",
+                 packet && size >= 2 ? little_endian_read_16(packet, 0) : 0,
+                 ext_param ? ext_param[0] : 0);
+        break;
+    case GATT_COMM_EVENT_ENCRYPTION_CHANGE:
+        if (packet && size >= 4) {
+            log_info("Rider security result: handle=%04x status=%d process=%d\n",
+                     little_endian_read_16(packet, 0), packet[2], packet[3]);
         }
         break;
     case GATT_COMM_EVENT_DISCONNECT_COMPLETE:

@@ -4,7 +4,7 @@
 
 `apps/rider_core_temp` 是 AC632N（bd19）上的独立 BLE 外设应用。它只负责 Rider CoreTemp 产品的应用编排、CORE 兼容 GATT 协议、M601 温度传感器适配和产品级板卡配置；不复用 `apps/spp_and_le` 的产品源文件，也不把产品协议放入 `apps/common` 或 `cpu/bd19`。
 
-设备名固定为 `ICXL-CoreTemp-Rider`，只启用 BLE 外设角色：经典蓝牙、SPP、BLE Client、安全配对、USB、音频、充电和演示按键逻辑均关闭。
+设备名固定为 `ICXL-CoreTemp-Rider`，只启用 BLE 外设角色：经典蓝牙、SPP、BLE Client、USB、音频、充电和演示按键逻辑均关闭。BLE Security Manager 使用无输入/无输出的 Just Works 自动配对和绑定，不需要人工输入 PIN；该模式提供链路加密，但不提供 MITM 身份认证。
 
 ## 目录结构
 

@@ -216,13 +216,13 @@
 
 #elif CONFIG_APP_RIDER_CORE_TEMP
 
-// Rider 是单一 BLE 外设，不启用经典蓝牙、主机角色或安全配对。
+// Rider 是单一 BLE 外设；BLE 安全管理器使用无输入/无输出的自动 Just Works。
 #define DOUBLE_BT_SAME_NAME                0
 #define DOUBLE_BT_SAME_MAC                 0
 #define CONFIG_APP_SPP_LE_TO_IDLE          0
 #define CONFIG_BLE_HIGH_SPEED              0
 #define CONFIG_BT_GATT_COMMON_ENABLE       1
-#define CONFIG_BT_SM_SUPPORT_ENABLE        0
+#define CONFIG_BT_SM_SUPPORT_ENABLE        1
 #define CONFIG_BT_GATT_CLIENT_NUM          0
 #define CONFIG_BT_GATT_SERVER_NUM          1
 #define CONFIG_BT_GATT_CONNECTION_NUM      (CONFIG_BT_GATT_SERVER_NUM + CONFIG_BT_GATT_CLIENT_NUM)
