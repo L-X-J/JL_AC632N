@@ -20,6 +20,7 @@
 #define RIDER_STANDARD_PERIOD_SECONDS   10
 #define RIDER_EXTERNAL_HR_TIMEOUT       15
 #define RIDER_CORE_FRAME_MAX            5
+#define RIDER_CORE_COMPAT_ADV_NAME      "CORE"
 
 static u8 rider_adv_data[RIDER_ADV_PACKET_MAX];
 static u8 rider_scan_rsp_data[RIDER_ADV_PACKET_MAX];
@@ -66,7 +67,9 @@ static gatt_server_cfg_t rider_server_config = {
  * it provides encryption/bonding but cannot provide MITM authentication.
  */
 static sm_cfg_t rider_sm_config = {
-    .slave_security_auto_req = 1,
+    /* DURA/CORE uses application-level accessory pairing.  Only respond if
+     * the collector explicitly requests link security. */
+    .slave_security_auto_req = 0,
     .slave_set_wait_security = 0,
     .io_capabilities = IO_CAPABILITY_NO_INPUT_NO_OUTPUT,
     .authentication_req_flags = SM_AUTHREQ_BONDING,
@@ -247,7 +250,6 @@ static u16 rider_make_standard_temperature(u8 *value, u16 value_size,
 static void rider_make_advertisement(const rider_temperature_snapshot_t *snapshot)
 {
     u16 offset = 0;
-    u8 name_len = (u8)strlen(RIDER_CORE_TEMP_NAME);
 
     memset(rider_adv_data, 0, sizeof(rider_adv_data));
     memset(rider_scan_rsp_data, 0, sizeof(rider_scan_rsp_data));
@@ -257,12 +259,20 @@ static void rider_make_advertisement(const rider_temperature_snapshot_t *snapsho
     rider_adv_data[offset++] = 0x01;
     rider_adv_data[offset++] = 0x06;
 
-    /* CORE service UUID in the generated-profile byte order. */
-    rider_adv_data[offset++] = 17;
-    rider_adv_data[offset++] = 0x07;
-    memcpy(&rider_adv_data[offset], rider_core_service_uuid128,
-           sizeof(rider_core_service_uuid128));
-    offset += sizeof(rider_core_service_uuid128);
+    /* Match the official CORE advertisement: HTS UUID is in the primary
+     * packet, while the custom CTS UUID is returned in the scan response. */
+    rider_adv_data[offset++] = 3;
+    rider_adv_data[offset++] = 0x03;
+    rider_adv_data[offset++] = 0x09;
+    rider_adv_data[offset++] = 0x18;
+
+    /* CORE-compatible collectors may use the advertised local name as a
+     * secondary filter after checking the service UUID. */
+    rider_adv_data[offset++] = sizeof(RIDER_CORE_COMPAT_ADV_NAME);
+    rider_adv_data[offset++] = 0x09;
+    memcpy(&rider_adv_data[offset], RIDER_CORE_COMPAT_ADV_NAME,
+           sizeof(RIDER_CORE_COMPAT_ADV_NAME) - 1);
+    offset += sizeof(RIDER_CORE_COMPAT_ADV_NAME) - 1;
 
     /* The documented beacon has no unavailable sentinel; omit it until valid. */
     if (snapshot && snapshot->valid) {
@@ -280,22 +290,22 @@ static void rider_make_advertisement(const rider_temperature_snapshot_t *snapsho
         }
     }
 
-    /* Active scanners can discover the standard thermometer UUID and name. */
-    rider_scan_rsp_data[0] = 3;
+    /* Active scanners can discover the complementary services and CTS. */
+    rider_scan_rsp_data[0] = 5;
     rider_scan_rsp_data[1] = 0x03;
-    rider_scan_rsp_data[2] = 0x09;
+    rider_scan_rsp_data[2] = 0x0a;
     rider_scan_rsp_data[3] = 0x18;
-    if (name_len > sizeof(rider_scan_rsp_data) - 6) {
-        name_len = sizeof(rider_scan_rsp_data) - 6;
-    }
-    rider_scan_rsp_data[4] = name_len + 1;
-    rider_scan_rsp_data[5] = 0x09;
-    memcpy(&rider_scan_rsp_data[6], RIDER_CORE_TEMP_NAME, name_len);
+    rider_scan_rsp_data[4] = 0x0f;
+    rider_scan_rsp_data[5] = 0x18;
+    rider_scan_rsp_data[6] = 17;
+    rider_scan_rsp_data[7] = 0x07;
+    memcpy(&rider_scan_rsp_data[8], rider_core_service_uuid128,
+           sizeof(rider_core_service_uuid128));
 
     rider_adv_config.adv_data = rider_adv_data;
     rider_adv_config.adv_data_len = offset;
     rider_adv_config.rsp_data = rider_scan_rsp_data;
-    rider_adv_config.rsp_data_len = name_len + 6;
+    rider_adv_config.rsp_data_len = 8 + sizeof(rider_core_service_uuid128);
     rider_adv_config.adv_interval = RIDER_ADV_INTERVAL;
     rider_adv_config.adv_auto_do = 1;
     rider_adv_config.adv_type = ADV_IND;
@@ -550,6 +560,8 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
     case GATT_COMM_EVENT_DISCONNECT_COMPLETE:
         if (packet && size >= 2) {
             handle = little_endian_read_16(packet, 0);
+            log_info("Rider disconnect: handle=%04x reason=%02x\n",
+                     handle, size >= 3 ? packet[2] : 0);
             if (handle == rider_connection_handle) {
                 rider_connection_handle = 0;
                 rider_external_hr_age = 0;
