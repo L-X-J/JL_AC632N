@@ -128,11 +128,11 @@ static int16_t rider_m601_to_centi(u16 raw_bits)
     int32_t raw = (int16_t)raw_bits;
     int32_t scaled = raw * 100;
 
-    /* Round away from zero before the arithmetic right shift. */
+    /* Round to the nearest centi-degree without relying on signed shifts. */
     if (scaled >= 0) {
         scaled = (scaled + 128) / 256;
     } else {
-        scaled = (scaled - 128) / 256;
+        scaled = -(((-scaled) + 128) / 256);
     }
     scaled += 4000;
     return (int16_t)scaled;

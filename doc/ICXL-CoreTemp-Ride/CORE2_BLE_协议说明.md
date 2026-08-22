@@ -201,6 +201,8 @@ CORE 的行为：
 |---|---|---|
 | `0x180F` Battery Service | `0x2A19` Battery Level | `UINT8`，范围 `0`–`100`，表示电量百分比 |
 
+本 Rider 固件按上述范围提供 Battery Level。由于目标板没有独立 fuel-gauge，默认以 AC632N `AD_CH_VBAT` 的电压做线性估算（`3.30V=0%`、`4.22V=100%`，超出范围饱和到 0/100）；量产前必须按实际电池、分压网络和校准数据调整阈值。不得把该估算当作精确剩余容量。
+
 ## 7. 广播 Beacon 温度格式
 
 无需连接时，可从 AD Type `0xFF` 的 Manufacturer Specific Data 读取核心温度。

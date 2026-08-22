@@ -51,9 +51,9 @@ profile 使用 `include/core_temp_profile.h` 中的静态 ATT 数据，所有多
 
 CORE 温度通知的核心温度是有符号百分之一摄氏度；当前实现只提供核心温度和 Quality & State 字段。没有外部心率时，Quality 使用 `7 (N/A)`，状态表示支持心率但未收到信号；Control Point 只实现协议文档中约定的外部心率输入 `0x13`，其他操作返回“不支持”。无效温度编码为 `0x7FFF`。
 
-标准 Health Thermometer 使用 IEEE 11073 FLOAT，分辨率为 `10^-2 °C`；无效值使用 NaN mantissa `0x007FFFFF`。标准通知按约 10 秒节拍发送，CORE 自定义帧随采样调度发送。广播包含 CORE 服务 UUID；只有快照有效时才附带 Manufacturer Specific Data 温度字段。广播温度单位为千分之一摄氏度。
+标准 Health Thermometer 使用 IEEE 11073 FLOAT，分辨率为 `10^-2 °C`；无效值使用 NaN mantissa `0x007FFFFF`。标准通知按约 10 秒节拍发送，CORE 自定义帧随采样调度发送。广播主包包含 CORE 128-bit 服务 UUID，扫描响应包含 `0x1809` 和完整设备名；只有快照有效时才附带 Manufacturer Specific Data 温度字段。广播温度单位为千分之一摄氏度。
 
-当前没有可靠的电量计，因此 Battery Level 返回 `0xFF` 表示未知。它不是电量百分比，客户端不得把它显示为 100%。
+Battery Level 始终返回协议规定的 `0-100`。当前板级没有独立 fuel-gauge，固件使用 AC632N `AD_CH_VBAT` 的电压估算：默认 `3.30V=0%`、`4.22V=100%`，阈值位于 `board/bd19/board_ac632n_rider_cfg.h`，必须按实际电池和分压校准。该值是电压估算，不代表精确剩余容量。
 
 ## PB7 电气和所有权要求
 
@@ -81,7 +81,7 @@ make ac632n_rider_core_temp
 
 CLion 代码索引目标为 `ac632n_rider_core_temp_indexing`，固件链接仍由 `apps/rider_core_temp/board/bd19/Makefile` 负责。当前开发机若未安装杰理 q32s 工具链（`clang`、`lto-wrapper`、`lto-ar`），只能完成 Make dry-run、CMake 配置和主机侧语法/索引检查，不能声称固件已完成链接或可烧录。
 
-硬件验收必须至少覆盖：广播服务 UUID 和名称、连接/断连、温度与标准体温 CCCD、Control Point indication、无设备/CRC 错误、PB7 上拉和长线时序，以及 Battery `0xFF` 的客户端显示行为。
+硬件验收必须至少覆盖：广播服务 UUID 和名称、连接/断连、温度与标准体温 CCCD、Control Point indication（连续写入应返回 busy）、无设备/CRC 错误、PB7 上拉和长线时序，以及 VBAT ADC/电池百分比阈值校准。
 
 ## 扩展方式和禁止事项
 

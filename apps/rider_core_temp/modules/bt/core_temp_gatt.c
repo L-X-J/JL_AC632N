@@ -4,6 +4,7 @@
 #include "core_temp_profile.h"
 #include "gatt_common/le_gatt_common.h"
 #include "le_common.h"
+#include "asm/adc_api.h"
 
 #if CONFIG_APP_RIDER_CORE_TEMP
 
@@ -14,7 +15,6 @@
 #define RIDER_STANDARD_PERIOD_SECONDS   10
 #define RIDER_EXTERNAL_HR_TIMEOUT       15
 #define RIDER_CORE_FRAME_MAX            5
-#define RIDER_BATTERY_LEVEL_UNKNOWN     0xff
 
 static u8 rider_adv_data[RIDER_ADV_PACKET_MAX];
 static u8 rider_scan_rsp_data[RIDER_ADV_PACKET_MAX];
@@ -27,6 +27,9 @@ static u8 rider_last_adv_valid;
 static int16_t rider_last_adv_core;
 static u8 rider_pending_cp_response[3];
 static u8 rider_pending_cp_response_valid;
+static u8 rider_cp_indication_in_flight;
+static u8 rider_last_battery_level;
+static u8 rider_battery_level_valid;
 
 static uint16_t rider_att_read_callback(hci_con_handle_t connection_handle,
                                         uint16_t att_handle,
@@ -40,6 +43,10 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
                                     uint8_t *buffer,
                                     uint16_t buffer_size);
 static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_param);
+
+#if RIDER_BATTERY_FULL_MV <= RIDER_BATTERY_EMPTY_MV
+#error "Rider battery full voltage must be above empty voltage"
+#endif
 
 static gatt_server_cfg_t rider_server_config = {
     .att_read_cb = rider_att_read_callback,
@@ -106,6 +113,48 @@ static int rider_send_subscribed_value(u16 connection_handle, u16 value_handle,
     }
     return ble_comm_att_send_data(connection_handle, value_handle, value, value_len,
                                   ATT_OP_AUTO_READ_CCC);
+}
+
+/** Convert the AC632N VBAT monitor into the protocol's 0..100 percentage. */
+static u8 rider_get_battery_level(void)
+{
+    u32 battery_mv = adc_get_voltage(AD_CH_VBAT) * 4;
+    u32 span_mv = RIDER_BATTERY_FULL_MV - RIDER_BATTERY_EMPTY_MV;
+
+    if (battery_mv <= RIDER_BATTERY_EMPTY_MV) {
+        return 0;
+    }
+    if (battery_mv >= RIDER_BATTERY_FULL_MV) {
+        return 100;
+    }
+    return (u8)(((battery_mv - RIDER_BATTERY_EMPTY_MV) * 100 + span_mv / 2) /
+                span_mv);
+}
+
+/** Notify a subscribed client only after a measured percentage changes. */
+static void rider_refresh_battery(void)
+{
+    u8 battery_level = rider_get_battery_level();
+    int result;
+
+    if (rider_battery_level_valid && battery_level == rider_last_battery_level) {
+        return;
+    }
+    if (!rider_connection_handle) {
+        rider_last_battery_level = battery_level;
+        rider_battery_level_valid = 1;
+        return;
+    }
+
+    result = rider_send_subscribed_value(rider_connection_handle,
+                                         RIDER_ATT_BATTERY_VALUE_HANDLE,
+                                         RIDER_ATT_BATTERY_CCC_HANDLE,
+                                         GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION,
+                                         &battery_level, sizeof(battery_level));
+    if (result == GATT_OP_RET_SUCESS) {
+        rider_last_battery_level = battery_level;
+        rider_battery_level_valid = 1;
+    }
 }
 
 /** Encode the variable-length CORE temperature notification frame. */
@@ -253,54 +302,67 @@ static void rider_refresh_advertisement(const rider_temperature_snapshot_t *snap
 /** Try to flush the one outstanding Control Point response indication. */
 static void rider_try_send_pending_cp_response(void)
 {
-    if (!rider_pending_cp_response_valid || !rider_connection_handle) {
+    int result;
+
+    if (!rider_pending_cp_response_valid || rider_cp_indication_in_flight ||
+        !rider_connection_handle) {
         return;
     }
-    if (rider_send_subscribed_value(rider_connection_handle,
-                                    RIDER_ATT_CORE_CONTROL_POINT_VALUE_HANDLE,
-                                    RIDER_ATT_CORE_CONTROL_POINT_CCC_HANDLE,
-                                    GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_INDICATION,
-                                    rider_pending_cp_response,
-                                    sizeof(rider_pending_cp_response)) == GATT_OP_RET_SUCESS) {
+    result = rider_send_subscribed_value(rider_connection_handle,
+                                         RIDER_ATT_CORE_CONTROL_POINT_VALUE_HANDLE,
+                                         RIDER_ATT_CORE_CONTROL_POINT_CCC_HANDLE,
+                                         GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_INDICATION,
+                                         rider_pending_cp_response,
+                                         sizeof(rider_pending_cp_response));
+    if (result == GATT_OP_RET_SUCESS) {
         rider_pending_cp_response_valid = 0;
+        rider_cp_indication_in_flight = 1;
     }
 }
 
 /** Queue a CORE Control Point response until indication CCCD and ATT flow allow it. */
-static void rider_queue_control_point_response(u8 opcode, u8 result)
+static int rider_queue_control_point_response(u8 opcode, u8 result)
 {
+    if (rider_pending_cp_response_valid || rider_cp_indication_in_flight) {
+        return GATT_CMD_RET_BUSY;
+    }
     rider_pending_cp_response[0] = 0x80;
     rider_pending_cp_response[1] = opcode;
     rider_pending_cp_response[2] = result;
     rider_pending_cp_response_valid = 1;
     rider_try_send_pending_cp_response();
+    return GATT_OP_RET_SUCESS;
 }
 
 /** Implement only the documented direct external-heart-rate operation (0x13). */
-static void rider_handle_control_point(const u8 *buffer, u16 buffer_size)
+static int rider_handle_control_point(const u8 *buffer, u16 buffer_size)
 {
     u8 opcode;
+    int result;
 
     if (!buffer || !buffer_size) {
-        return;
+        return GATT_CMD_PARAM_ERROR;
+    }
+    if (rider_pending_cp_response_valid || rider_cp_indication_in_flight) {
+        return GATT_CMD_RET_BUSY;
     }
     opcode = buffer[0];
     if (opcode != 0x13) {
-        rider_queue_control_point_response(opcode, 0x02); /* unsupported */
-        return;
+        return rider_queue_control_point_response(opcode, 0x02); /* unsupported */
     }
 
     if (buffer_size == 1) {
         rider_estimator_set_external_heart_rate(0, 0);
         rider_external_hr_age = 0;
-        rider_queue_control_point_response(opcode, 0x01);
+        result = rider_queue_control_point_response(opcode, 0x01);
     } else if (buffer_size == 2 && buffer[1] != 0) {
         rider_estimator_set_external_heart_rate(buffer[1], 1);
         rider_external_hr_age = 0;
-        rider_queue_control_point_response(opcode, 0x01);
+        result = rider_queue_control_point_response(opcode, 0x01);
     } else {
-        rider_queue_control_point_response(opcode, 0x03); /* invalid parameter */
+        result = rider_queue_control_point_response(opcode, 0x03); /* invalid parameter */
     }
+    return result;
 }
 
 /** Handle dynamic ATT reads for GAP, CORE, standard and device information data. */
@@ -346,8 +408,7 @@ static uint16_t rider_att_read_callback(hci_con_handle_t connection_handle,
         value[0] = 0x02;
         return rider_copy_value(value, 1, offset, buffer, buffer_size);
     case RIDER_ATT_BATTERY_VALUE_HANDLE:
-        /* No fuel-gauge IC is connected; 0xff is explicitly "unknown" here. */
-        value[0] = RIDER_BATTERY_LEVEL_UNKNOWN;
+        value[0] = rider_get_battery_level();
         return rider_copy_value(value, 1, offset, buffer, buffer_size);
     case RIDER_ATT_MANUFACTURER_VALUE_HANDLE:
         return rider_copy_value((const u8 *)RIDER_CORE_TEMP_MANUFACTURER,
@@ -388,7 +449,7 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
 
     switch (att_handle) {
     case RIDER_ATT_SERVICE_CHANGED_CCC_HANDLE:
-        if (!buffer || buffer_size < 2) {
+        if (!buffer || buffer_size != 2) {
             return GATT_CMD_PARAM_ERROR;
         }
         ccc_config = ((u16)buffer[0] | ((u16)buffer[1] << 8)) &
@@ -398,15 +459,22 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
     case RIDER_ATT_CORE_TEMPERATURE_CCC_HANDLE:
     case RIDER_ATT_STANDARD_TEMPERATURE_CCC_HANDLE:
     case RIDER_ATT_BATTERY_CCC_HANDLE:
-        if (!buffer || buffer_size < 2) {
+        if (!buffer || buffer_size != 2) {
             return GATT_CMD_PARAM_ERROR;
         }
         ccc_config = ((u16)buffer[0] | ((u16)buffer[1] << 8)) &
                      GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION;
-        return ble_gatt_server_characteristic_ccc_set(connection_handle, att_handle,
-                                                       ccc_config);
+        {
+            int result = ble_gatt_server_characteristic_ccc_set(connection_handle,
+                                                                att_handle, ccc_config);
+            if (att_handle == RIDER_ATT_BATTERY_CCC_HANDLE && result == GATT_OP_RET_SUCESS) {
+                rider_battery_level_valid = 0;
+                rider_refresh_battery();
+            }
+            return result;
+        }
     case RIDER_ATT_CORE_CONTROL_POINT_CCC_HANDLE:
-        if (!buffer || buffer_size < 2) {
+        if (!buffer || buffer_size != 2) {
             return GATT_CMD_PARAM_ERROR;
         }
         ccc_config = ((u16)buffer[0] | ((u16)buffer[1] << 8)) &
@@ -418,8 +486,7 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
             return result;
         }
     case RIDER_ATT_CORE_CONTROL_POINT_VALUE_HANDLE:
-        rider_handle_control_point(buffer, buffer_size);
-        return GATT_OP_RET_SUCESS;
+        return rider_handle_control_point(buffer, buffer_size);
     default:
         return GATT_CMD_PARAM_ERROR;
     }
@@ -438,6 +505,9 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
             rider_tick_count = 0;
             rider_external_hr_age = 0;
             rider_pending_cp_response_valid = 0;
+            rider_cp_indication_in_flight = 0;
+            rider_battery_level_valid = 0;
+            rider_estimator_set_external_heart_rate(0, 0);
         }
         break;
     case GATT_COMM_EVENT_DISCONNECT_COMPLETE:
@@ -447,6 +517,8 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
                 rider_connection_handle = 0;
                 rider_external_hr_age = 0;
                 rider_pending_cp_response_valid = 0;
+                rider_cp_indication_in_flight = 0;
+                rider_battery_level_valid = 0;
                 rider_estimator_set_external_heart_rate(0, 0);
             }
         }
@@ -458,6 +530,8 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
             rider_connection_handle = 0;
             rider_external_hr_age = 0;
             rider_pending_cp_response_valid = 0;
+            rider_cp_indication_in_flight = 0;
+            rider_battery_level_valid = 0;
             rider_estimator_set_external_heart_rate(0, 0);
         }
         break;
@@ -470,7 +544,7 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
         if (packet && size >= 4 &&
             little_endian_read_16(packet, 0) == rider_connection_handle &&
             little_endian_read_16(packet, 2) == RIDER_ATT_CORE_CONTROL_POINT_VALUE_HANDLE) {
-            rider_pending_cp_response_valid = 0;
+            rider_cp_indication_in_flight = 0;
         }
         break;
     default:
@@ -497,6 +571,8 @@ void rider_core_temp_gatt_init(void)
     rider_tick_count = 0;
     rider_external_hr_age = 0;
     rider_pending_cp_response_valid = 0;
+    rider_cp_indication_in_flight = 0;
+    rider_battery_level_valid = 0;
     rider_last_adv_valid = 0;
     rider_last_adv_core = 0;
     rider_estimator_copy_snapshot(&snapshot);
@@ -511,6 +587,8 @@ void rider_core_temp_gatt_init(void)
 void rider_core_temp_gatt_exit(void)
 {
     rider_pending_cp_response_valid = 0;
+    rider_cp_indication_in_flight = 0;
+    rider_battery_level_valid = 0;
     rider_connection_handle = 0;
     if (rider_gatt_ready) {
         ble_comm_exit();
@@ -546,6 +624,7 @@ void rider_core_temp_ble_tick(void)
     }
 
     rider_refresh_advertisement(&snapshot);
+    rider_refresh_battery();
     if (!rider_connection_handle) {
         return;
     }
