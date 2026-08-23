@@ -29,8 +29,8 @@ enum rider_temperature_status {
 };
 
 /* The state describes the signal lifecycle, independently of the 1-Wire
- * transport status.  A stable contact sample is required before it can be
- * published as skin temperature or used by the shadow core estimator. */
+ * transport status.  A valid sample inside the wear window may be exposed as
+ * a skin-near proxy while warming; core publication still requires stability. */
 enum rider_temperature_state {
     RIDER_TEMP_STATE_NO_DEVICE = 0,
     RIDER_TEMP_STATE_NOT_WORN = 1,
@@ -138,7 +138,7 @@ typedef struct {
     int16_t slope_centi_per_min;
     uint8_t valid;
     uint8_t contact_valid;
-    uint8_t skin_valid;
+    uint8_t skin_valid;              /* Filtered skin-near proxy after wear gate. */
     uint8_t core_estimate_valid;     /* Numerical candidate is available. */
     uint8_t core_estimate_verified;  /* Held-out validation gate has passed. */
     uint8_t quality;

@@ -40,13 +40,22 @@ static u8 rider_battery_pending;
 static u8 rider_last_battery_level;
 static u8 rider_battery_level_valid;
 
-/** Return whether a stable contact value can be sent in the custom CORE frame.
- * The configured projection decides whether its mandatory core field is a
- * validated estimate, a contact proxy, or the 0x7FFF shadow sentinel. */
+/** Return whether the custom CORE frame can carry a skin-near value.
+ * The wear gate and filter reject ambient/invalid samples; core publication
+ * has a separate stability check below. */
 static u8 rider_temperature_notification_allowed(
     const rider_temperature_snapshot_t *snapshot)
 {
     return snapshot && snapshot->skin_valid;
+}
+
+/** Require thermal stability before projecting contact temperature as core. */
+static u8 rider_contact_proxy_core_available(
+    const rider_temperature_snapshot_t *snapshot)
+{
+    return snapshot && snapshot->contact_valid &&
+           snapshot->temperature_state == RIDER_TEMP_STATE_STABLE &&
+           snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH;
 }
 
 /** Return whether the configured CORE projection has a publishable value. */
@@ -59,7 +68,7 @@ static u8 rider_core_frame_value_available(
 #if RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_STRICT
     return snapshot->core_estimate_valid && snapshot->core_estimate_verified;
 #elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
-    return snapshot->contact_valid && snapshot->skin_valid;
+    return rider_contact_proxy_core_available(snapshot);
 #else
     return 0;
 #endif
@@ -76,7 +85,7 @@ static int16_t rider_core_frame_value(
     return snapshot->core_estimate_valid && snapshot->core_estimate_verified
                ? snapshot->core_temperature_centi : 0x7fff;
 #elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
-    return snapshot->contact_valid && snapshot->skin_valid
+    return rider_contact_proxy_core_available(snapshot)
                ? snapshot->contact_temperature_centi : 0x7fff;
 #else
     return 0x7fff;
@@ -475,7 +484,7 @@ static u8 rider_try_send_pending_measurements(void)
         int result;
 
         if (!rider_temperature_notification_allowed(&snapshot)) {
-            log_info("Rider first CORE temperature skipped: no stable contact status=%u\n",
+            log_info("Rider first CORE temperature skipped: no skin sample status=%u\n",
                      (unsigned)snapshot.sensor_status);
             rider_core_temperature_pending = 0;
             result = GATT_OP_RET_SUCESS;

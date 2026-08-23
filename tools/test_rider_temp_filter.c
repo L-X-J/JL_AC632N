@@ -51,7 +51,7 @@ static void test_median_rejects_an_in_window_spike(void)
     assert(output.filtered_temperature_centi == 3600);
 }
 
-/** Verify the configured warming count and stable quality transition. */
+/** Verify warming samples are valid skin-proxy candidates before stability. */
 static void test_warming_and_stable_boundaries(void)
 {
     rider_temperature_filter_output_t output;
@@ -63,6 +63,7 @@ static void test_warming_and_stable_boundaries(void)
         assert(output.valid);
         assert(output.state == RIDER_TEMP_STATE_WARMING);
         assert(output.quality == RIDER_TEMP_QUALITY_POOR);
+        assert(output.filtered_temperature_centi == 3600);
     }
     output = feed(RIDER_TEMP_FILTER_STABLE_SAMPLES, 3600, 1,
                   RIDER_TEMP_STATUS_OK);

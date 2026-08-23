@@ -184,12 +184,12 @@ void rider_estimator_init(void)
 }
 
 /**
- * Consume one validated M601 sample and publish only stable contact data.
+ * Consume one validated M601 sample and publish a filtered skin-near proxy.
  *
  * The numerical core model is deliberately shadow-only until an offline
- * calibration is installed. CONTACT_PROXY may still expose the independent
- * stable contact value for bring-up, without treating a guessed offset as a
- * core estimate.
+ * calibration is installed. The skin-near proxy is available during WARMING;
+ * CONTACT_PROXY still exposes a separate stable contact value for bring-up,
+ * without treating a guessed offset as a core estimate.
  */
 void rider_estimator_consume(const rider_temperature_sample_t *sample)
 {
@@ -215,7 +215,10 @@ void rider_estimator_consume(const rider_temperature_sample_t *sample)
     rider_snapshot.contact_temperature_centi =
         filtered.filtered_temperature_centi;
     rider_snapshot.contact_valid = 1;
-    rider_snapshot.skin_valid = filtered.state == RIDER_TEMP_STATE_STABLE;
+    /* The wear window already rejects ambient values. Expose the filtered
+     * skin-near proxy during WARMING so clients can observe convergence;
+     * core publication below remains gated by STABLE. */
+    rider_snapshot.skin_valid = filtered.valid;
     rider_snapshot.skin_temperature_centi = rider_snapshot.skin_valid
                                                 ? filtered.filtered_temperature_centi
                                                 : 0x7fff;
@@ -229,7 +232,11 @@ void rider_estimator_consume(const rider_temperature_sample_t *sample)
     rider_snapshot.valid = rider_snapshot.core_estimate_valid &&
                            rider_snapshot.core_estimate_verified;
 #elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
-    rider_snapshot.valid = rider_snapshot.contact_valid && rider_snapshot.skin_valid;
+    rider_snapshot.valid = rider_snapshot.contact_valid &&
+                           rider_snapshot.temperature_state ==
+                               RIDER_TEMP_STATE_STABLE &&
+                           rider_snapshot.data_freshness ==
+                               RIDER_TEMP_FRESHNESS_FRESH;
 #else
     /* Shadow mode keeps all unvalidated estimates out of notifications. */
     rider_snapshot.valid = 0;
@@ -308,7 +315,11 @@ void rider_estimator_set_core_calibration(
     rider_snapshot.core_estimate_verified = 0;
     rider_snapshot.core_temperature_centi = 0x7fff;
 #if RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
-    rider_snapshot.valid = rider_snapshot.contact_valid && rider_snapshot.skin_valid;
+    rider_snapshot.valid = rider_snapshot.contact_valid &&
+                           rider_snapshot.temperature_state ==
+                               RIDER_TEMP_STATE_STABLE &&
+                           rider_snapshot.data_freshness ==
+                               RIDER_TEMP_FRESHNESS_FRESH;
 #else
     rider_snapshot.valid = 0;
 #endif

@@ -123,7 +123,7 @@ Offset  长度  字段
 | Heart Rate | `UINT8` | BPM；值 `0` 表示当前没有心率信号 |
 | Heat Strain Index | `UINT8` | 数值 ÷ 10，范围约 `0.0`–`25.4` |
 
-核心温度为 `0x7FFF`（十进制 `32767`）时，表示 **Data not available**，不得将其换算为正常温度。通用 Rider 温度模块默认处于影子模式：稳定接触读数可作为皮肤附近温度附在 Skin Temperature 字段，但核心字段保持 `0x7FFF`。当前 AC632N bring-up 板级为兼容旧码表显式选择 `CONTACT_PROXY`，因此稳定接触后核心字段会带滤波后的接触温度；该字段是代理值，不是经过参考数据验证的核心体温。完成留出时段验证后才可启用 `STRICT`。
+核心温度为 `0x7FFF`（十进制 `32767`）时，表示 **Data not available**，不得将其换算为正常温度。通过 `30~45°C` 佩戴窗口的有效样本在 `WARMING` 或 `STABLE` 阶段可作为皮肤附近代理附在 Skin Temperature 字段；预热阶段核心字段仍保持 `0x7FFF`。当前 AC632N bring-up 板级为兼容旧码表显式选择 `CONTACT_PROXY`，因此达到稳定接触后核心字段会带滤波后的接触温度；该字段是代理值，不是经过参考数据验证的核心体温。完成留出时段验证后才可启用 `STRICT`。
 
 #### Quality & State 字段
 
@@ -171,7 +171,7 @@ bits 3、6–7 为保留位，应为 0。
 
 ## 5. 标准 Health Thermometer Service
 
-如果码表只实现 BLE SIG 标准 Health Thermometer Profile，可使用此服务。平均温度不是 CORE BLE 广播或 `0x2101` 的字段，而是码表基于历史样本自行统计的汇总值；Rider 的单 M601 在稳定接触阶段可作为皮肤附近温度填入自定义 CORE 的 Skin Temperature 字段，但标准 HTS 不承载皮温。通用 `SHADOW`/严格未验证状态下，HTS 核心值保持 NaN；当前板级 `CONTACT_PROXY` 为兼容旧码表发送滤波接触温度代理，码表侧应将其标注为接触温度趋势，不应宣称为已验证核心体温。
+如果码表只实现 BLE SIG 标准 Health Thermometer Profile，可使用此服务。平均温度不是 CORE BLE 广播或 `0x2101` 的字段，而是码表基于历史样本自行统计的汇总值；Rider 的单 M601 在通过佩戴窗口的 `WARMING`/`STABLE` 阶段可作为皮肤附近温度填入自定义 CORE 的 Skin Temperature 字段，但标准 HTS 不承载皮温。通用 `SHADOW`/严格未验证状态下，HTS 核心值保持 NaN；当前板级 `CONTACT_PROXY` 为兼容旧码表，仅在稳定接触后发送滤波接触温度代理，码表侧应将其标注为接触温度趋势，不应宣称为已验证核心体温。
 
 | 项目 | UUID | 说明 |
 |---|---|---|
@@ -193,7 +193,7 @@ CORE 的行为：
 - Flags.bit1：`0`，不带时间戳；
 - Flags.bit2：`1`，携带 Temperature Type；
 - 无有效值时发送 IEEE 11073 NaN：`0x007FFFFF`；
-- CORE 官方实现和 Wear OS 示例使用 Notification CCCD；本 Rider 固件在此基础上保留 `Read`，兼容 DURA 在订阅前主动读取当前值的流程。Rider 在 `STRICT` 模式下仅发送已验证核心估算；`SHADOW` 返回 IEEE 11073 NaN；当前板级 `CONTACT_PROXY` 在稳定接触后发送滤波接触温度代理。`2A1D` 单独返回 `0x02`，HTS 当前发送节拍约为 **10 秒**。自定义 `0x2101` 温度特征按采样节拍约 1 Hz 发送。
+- CORE 官方实现和 Wear OS 示例使用 Notification CCCD；本 Rider 固件在此基础上保留 `Read`，兼容 DURA 在订阅前主动读取当前值的流程。Rider 在 `STRICT` 模式下仅发送已验证核心估算；`SHADOW` 返回 IEEE 11073 NaN；当前板级 `CONTACT_PROXY` 在稳定接触后发送滤波接触温度代理。`2A1D` 单独返回 `0x02`，HTS 当前发送节拍约为 **10 秒**。自定义 `0x2101` 温度特征按采样节拍约 1 Hz 发送，`WARMING` 也可附带 Skin Temperature 代理，但不会因此提前发布 HTS/核心字段。
 
 ### 5.2 连接时序和认证
 
@@ -299,7 +299,7 @@ Control Point UUID：
 6. 仅需要粗略实时数值、且不希望保持连接时，解析厂商广播数据中的 `Beacon Temperature`。
 7. 断连、空帧、RFU bits 非零或长度不足的帧应丢弃并记录诊断信息，不应将异常数据展示为体温。
 
-本项目 Rider 固件另有产品侧约束：M601 通过 CRC 和 `-40~125°C` 物理范围后，还必须落在默认 `30~45°C` 佩戴区间；脱离人体产生的 `23°C` 等环境读数会按未佩戴处理。稳定接触后，自定义 CORE 可以带皮肤字段；通用影子模式的核心字段为 `0x7FFF`，当前板级 `CONTACT_PROXY` 则把滤波接触温度映射到 CORE/HTS/广播，严格模式才会发送通过标定验证的核心估算。无效样本在 ATT Read 中使用 CORE/HTS 协议规定的 `0x7FFF`/IEEE FLOAT NaN 哨兵，未稳定接触时不会通过已订阅的温度 Notification 反复发送。因此码表侧应对断报保持上一有效值或暂停平均统计，不能把缺失窗口按 `0°C` 或低温样本参与平均。平均温度不是 Rider 固件上报字段，仍由码表基于有效历史样本自行计算；CONTACT_PROXY 的平均只代表接触温度趋势。
+本项目 Rider 固件另有产品侧约束：M601 通过 CRC 和 `-40~125°C` 物理范围后，还必须落在默认 `30~45°C` 佩戴区间；脱离人体产生的 `23°C` 等环境读数会按未佩戴处理。通过佩戴窗口后，自定义 CORE 可以在 `WARMING`/`STABLE` 阶段带皮肤附近字段；通用影子模式的核心字段为 `0x7FFF`，当前板级 `CONTACT_PROXY` 则仅在稳定接触后把滤波接触温度映射到 CORE/HTS/广播，严格模式才会发送通过标定验证的核心估算。无效样本在 ATT Read 中使用 CORE/HTS 协议规定的 `0x7FFF`/IEEE FLOAT NaN 哨兵，未通过佩戴窗口或数据陈旧时不会通过已订阅的温度 Notification 反复发送。因此码表侧应对断报保持上一有效值或暂停平均统计，不能把缺失窗口按 `0°C` 或低温样本参与平均。平均温度不是 Rider 固件上报字段，仍由码表基于有效历史样本自行计算；Skin/CONTACT_PROXY 的平均只代表皮肤附近或接触温度趋势。
 
 ## 10. 参考资料
 
