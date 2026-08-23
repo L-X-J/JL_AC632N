@@ -22,7 +22,6 @@
 #define RIDER_EXTERNAL_HR_TIMEOUT       15
 #define RIDER_CORE_FRAME_MAX            5
 #define RIDER_STANDARD_TEMPERATURE_FRAME_SIZE 5
-#define RIDER_CORE_COMPAT_ADV_NAME      "CORE"
 
 static u8 rider_adv_data[RIDER_ADV_PACKET_MAX];
 static u8 rider_scan_rsp_data[RIDER_ADV_PACKET_MAX];
@@ -32,7 +31,6 @@ static u16 rider_tick_count;
 static u8 rider_external_hr_age;
 static u8 rider_gatt_ready;
 static u8 rider_last_adv_valid;
-static int16_t rider_last_adv_core;
 static u8 rider_pending_cp_response[3];
 static u8 rider_pending_cp_response_valid;
 static u8 rider_cp_indication_in_flight;
@@ -429,6 +427,7 @@ static u8 rider_try_send_pending_measurements(void)
 static void rider_make_advertisement(const rider_temperature_snapshot_t *snapshot)
 {
     u16 offset = 0;
+    u8 name_len = (u8)strlen(RIDER_CORE_TEMP_NAME);
 
     memset(rider_adv_data, 0, sizeof(rider_adv_data));
     memset(rider_scan_rsp_data, 0, sizeof(rider_scan_rsp_data));
@@ -438,17 +437,15 @@ static void rider_make_advertisement(const rider_temperature_snapshot_t *snapsho
     rider_adv_data[offset++] = 0x01;
     rider_adv_data[offset++] = 0x06;
 
-    /* Match the official CORE beacon layout: HTS UUID and the short CORE name
-     * stay in the primary packet; the custom service UUID is in scan response. */
-    rider_adv_data[offset++] = 3;
-    rider_adv_data[offset++] = 0x03;
-    rider_adv_data[offset++] = 0x09;
-    rider_adv_data[offset++] = 0x18;
-    rider_adv_data[offset++] = sizeof(RIDER_CORE_COMPAT_ADV_NAME);
-    rider_adv_data[offset++] = 0x09;
-    memcpy(&rider_adv_data[offset], RIDER_CORE_COMPAT_ADV_NAME,
-           sizeof(RIDER_CORE_COMPAT_ADV_NAME) - 1);
-    offset += sizeof(RIDER_CORE_COMPAT_ADV_NAME) - 1;
+    /* Keep the custom service UUID in the primary packet.  DURA/COROS first
+     * sees the primary report and may start connecting before an active-scan
+     * response arrives; hiding this UUID in the response caused the previous
+     * scan-visible-but-not-connectable regression. */
+    rider_adv_data[offset++] = 17;
+    rider_adv_data[offset++] = 0x07;
+    memcpy(&rider_adv_data[offset], rider_core_service_uuid128,
+           sizeof(rider_core_service_uuid128));
+    offset += sizeof(rider_core_service_uuid128);
 
     /* The documented beacon has no unavailable sentinel; omit it until valid. */
     if (snapshot && snapshot->valid) {
@@ -466,19 +463,19 @@ static void rider_make_advertisement(const rider_temperature_snapshot_t *snapsho
         }
     }
 
-    /* Active scanners receive the complementary services and the custom CORE
-     * service UUID, exactly as described by the official implementation notes. */
-    rider_scan_rsp_data[0] = 5;
+    /* The response carries the standard thermometer UUID and product name.
+     * Clamp the name so future identity changes cannot overflow 31 bytes. */
+    if (name_len > sizeof(rider_scan_rsp_data) - 6) {
+        name_len = sizeof(rider_scan_rsp_data) - 6;
+    }
+    rider_scan_rsp_data[0] = 3;
     rider_scan_rsp_data[1] = 0x03;
-    rider_scan_rsp_data[2] = 0x0a;
+    rider_scan_rsp_data[2] = 0x09;
     rider_scan_rsp_data[3] = 0x18;
-    rider_scan_rsp_data[4] = 0x0f;
-    rider_scan_rsp_data[5] = 0x18;
-    rider_scan_rsp_data[6] = 17;
-    rider_scan_rsp_data[7] = 0x07;
-    memcpy(&rider_scan_rsp_data[8], rider_core_service_uuid128,
-           sizeof(rider_core_service_uuid128));
-    rider_adv_config.rsp_data_len = 8 + sizeof(rider_core_service_uuid128);
+    rider_scan_rsp_data[4] = name_len + 1;
+    rider_scan_rsp_data[5] = 0x09;
+    memcpy(&rider_scan_rsp_data[6], RIDER_CORE_TEMP_NAME, name_len);
+    rider_adv_config.rsp_data_len = name_len + 6;
 
     rider_adv_config.adv_data = rider_adv_data;
     rider_adv_config.adv_data_len = offset;
@@ -494,16 +491,23 @@ static void rider_make_advertisement(const rider_temperature_snapshot_t *snapsho
            sizeof(rider_adv_config.local_address_info));
 }
 
-/** Refresh the beacon only while disconnected, when its value actually changed. */
+/** Refresh only when measurement availability changes while disconnected.
+ *
+ * Legacy advertising data cannot be replaced while advertising, so the SDK
+ * implements an update by stopping and restarting ADV_IND.  Doing that for
+ * every 0.01 C sample created a one-second connection race: a central could
+ * scan the device and send CONNECT_IND while the controller was restarting.
+ * Temperature itself remains available through GATT; a fresh beacon value is
+ * also installed on every disconnect before automatic advertising resumes.
+ */
 static void rider_refresh_advertisement(const rider_temperature_snapshot_t *snapshot)
 {
     u8 valid = (snapshot && snapshot->valid) ? 1 : 0;
     int16_t core = valid ? snapshot->core_temperature_centi : 0;
-    u8 changed = (valid != rider_last_adv_valid) ||
-                 (valid && core != rider_last_adv_core);
+    u8 availability_changed = valid != rider_last_adv_valid;
 
-    rider_make_advertisement(snapshot);
-    if (changed && rider_gatt_ready && !rider_connection_handle) {
+    if (availability_changed && rider_gatt_ready && !rider_connection_handle) {
+        rider_make_advertisement(snapshot);
         log_info("Rider advertisement refresh: valid=%u core_centi=%d adv_len=%u rsp_len=%u\n",
                  (unsigned)valid, (int)core, rider_adv_config.adv_data_len,
                  rider_adv_config.rsp_data_len);
@@ -512,9 +516,8 @@ static void rider_refresh_advertisement(const rider_temperature_snapshot_t *snap
         if (ble_gatt_server_adv_enable(0) == GATT_OP_RET_SUCESS) {
             ble_gatt_server_adv_enable(1);
         }
+        rider_last_adv_valid = valid;
     }
-    rider_last_adv_valid = valid;
-    rider_last_adv_core = core;
 }
 
 /** Try to flush the one outstanding Control Point response indication. */
@@ -761,6 +764,7 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
 static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_param)
 {
     u16 handle;
+    rider_temperature_snapshot_t snapshot;
 
     switch (event) {
     case GATT_COMM_EVENT_CONNECTION_COMPLETE:
@@ -809,6 +813,13 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
                 rider_battery_pending = 0;
                 rider_battery_level_valid = 0;
                 rider_estimator_set_external_heart_rate(0, 0);
+
+                /* The common GATT layer re-enables advertising after this
+                 * callback returns, so prepare the latest payload without an
+                 * extra stop/start cycle. */
+                rider_estimator_copy_snapshot(&snapshot);
+                rider_make_advertisement(&snapshot);
+                rider_last_adv_valid = snapshot.valid ? 1 : 0;
             }
         }
         break;
@@ -887,12 +898,12 @@ void rider_core_temp_gatt_init(void)
     rider_battery_pending = 0;
     rider_battery_level_valid = 0;
     rider_last_adv_valid = 0;
-    rider_last_adv_core = 0;
     rider_estimator_copy_snapshot(&snapshot);
     ble_comm_set_config_name(RIDER_CORE_TEMP_NAME, 0);
     ble_gatt_server_set_profile(rider_core_temp_profile_data,
                                 sizeof(rider_core_temp_profile_data));
     rider_make_advertisement(&snapshot);
+    rider_last_adv_valid = snapshot.valid ? 1 : 0;
     ble_gatt_server_set_adv_config(&rider_adv_config);
 }
 
