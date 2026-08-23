@@ -43,6 +43,19 @@
 #define RIDER_BOARD_DIAG_LED_ACTIVE_LEVEL   1
 #define RIDER_BOARD_DIAG_KEY_ACTIVE_LEVEL   0
 
+/*
+ * The board bring-up firmware must provide a value to existing meters before
+ * an offline core-temperature calibration has passed its held-out-session
+ * gate. CONTACT_PROXY publishes the filtered, stable chest contact value in
+ * the CORE/HTS temperature field for compatibility; it is explicitly not a
+ * validated physiological core-temperature estimate. Keep the generic header
+ * default in SHADOW mode and allow a build flag to override this product
+ * choice when collecting calibration data or enabling STRICT mode.
+ */
+#ifndef RIDER_CORE_TEMP_PUBLISH_MODE
+#define RIDER_CORE_TEMP_PUBLISH_MODE         RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
+#endif
+
 #define UART_DB_TX_PIN                      IO_PORTA_01                            //AT_CHART串口
 #define UART_DB_RX_PIN                      IO_PORTA_02
 #define UART_DB_RTS_PIN                     IO_PORTA_06

@@ -41,15 +41,15 @@ static u8 rider_last_battery_level;
 static u8 rider_battery_level_valid;
 
 /** Return whether a stable contact value can be sent in the custom CORE frame.
- * The frame may still carry a 0x7FFF core field while the estimator is shadow
- * only; standard HTS and the beacon use the stricter core predicate below. */
+ * The configured projection decides whether its mandatory core field is a
+ * validated estimate, a contact proxy, or the 0x7FFF shadow sentinel. */
 static u8 rider_temperature_notification_allowed(
     const rider_temperature_snapshot_t *snapshot)
 {
     return snapshot && snapshot->skin_valid;
 }
 
-/** Return whether the configured CORE projection has a core-like value. */
+/** Return whether the configured CORE projection has a publishable value. */
 static u8 rider_core_frame_value_available(
     const rider_temperature_snapshot_t *snapshot)
 {
@@ -65,7 +65,7 @@ static u8 rider_core_frame_value_available(
 #endif
 }
 
-/** Select the mandatory CORE field without hiding the shadow-mode sentinel. */
+/** Select the mandatory CORE field while preserving the shadow sentinel. */
 static int16_t rider_core_frame_value(
     const rider_temperature_snapshot_t *snapshot)
 {
@@ -103,12 +103,13 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
                                     uint16_t buffer_size);
 static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_param);
 
-/** Print protocol-facing temperature state without treating unavailable fields as zero. */
+/** Print protocol-facing state, including the configured published projection. */
 static void rider_log_temperature_snapshot(const char *stage,
                                            const rider_temperature_snapshot_t *snapshot)
 {
     log_info("Rider temperature %s: seq=%u valid=%u status=%u state=%u "
              "freshness=%u contact_centi=%d skin_centi=%d core_est_centi=%d "
+             "publish_mode=%u publish_core_centi=%d "
              "contact_valid=%u skin_valid=%u core_valid=%u core_verified=%u "
              "quality=%u confidence=%u\n",
              stage ? stage : "unknown",
@@ -123,6 +124,8 @@ static void rider_log_temperature_snapshot(const char *stage,
                  ? (int)snapshot->skin_temperature_centi : 32767,
              snapshot && snapshot->core_estimate_valid
                  ? (int)snapshot->core_temperature_centi : 32767,
+             (unsigned)RIDER_CORE_TEMP_PUBLISH_MODE,
+             (int)rider_core_frame_value(snapshot),
              snapshot ? (unsigned)snapshot->contact_valid : 0,
              snapshot ? (unsigned)snapshot->skin_valid : 0,
              snapshot ? (unsigned)snapshot->core_estimate_valid : 0,

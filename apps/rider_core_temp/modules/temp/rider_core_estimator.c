@@ -186,8 +186,10 @@ void rider_estimator_init(void)
 /**
  * Consume one validated M601 sample and publish only stable contact data.
  *
- * The core model is deliberately shadow-only until an offline calibration is
- * installed.  This prevents a guessed offset from entering a watch average.
+ * The numerical core model is deliberately shadow-only until an offline
+ * calibration is installed. CONTACT_PROXY may still expose the independent
+ * stable contact value for bring-up, without treating a guessed offset as a
+ * core estimate.
  */
 void rider_estimator_consume(const rider_temperature_sample_t *sample)
 {
