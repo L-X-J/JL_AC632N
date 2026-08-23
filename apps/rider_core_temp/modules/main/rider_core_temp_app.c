@@ -20,6 +20,7 @@ static void rider_core_temp_scheduler(void *priv)
         rider_estimator_consume(&sample);
         rider_consumed_sequence = sequence;
     }
+    rider_estimator_tick(sequence);
     rider_core_temp_ble_tick();
 }
 

@@ -17,7 +17,7 @@ apps/rider_core_temp/
   modules/diag/                      AC632N 板载 LED/按键诊断
   modules/main/                      温度采样调度与应用编排
   modules/system/                    产品身份和用户配置钩子
-  modules/temp/                      PB7/M601 1-Wire 驱动与快照转换
+  modules/temp/                      PB7/M601 1-Wire 驱动、滤波与快照转换
   board/bd19/                        AC632N 板级配置和启动适配
   config/                            SDK 库配置入口
 ```
@@ -27,7 +27,8 @@ apps/rider_core_temp/
 ```text
 PB7(IO_PORTB_07)
   -> m601_1wire.c: reset / CONVERT T / READ SCRATCHPAD
-  -> rider_core_estimator.c: CRC、范围检查后的协议快照
+  -> rider_temp_filter.c: 中值/EWMA、斜率和佩戴状态
+  -> rider_core_estimator.c: 接触/皮肤字段与校准核心影子估算
   -> core_temp_gatt.c: CORE 帧、标准体温帧、广播和通知
   -> BLE Central
 
@@ -36,7 +37,7 @@ J12（跳线接到 MCU GPIO）
   -> LED 状态显示 + UART0 串口诊断
 ```
 
-应用启动后先初始化 BLE common 和静态 GATT profile，再启动温度调度。M601 每个采样周期先发 `0xCC 0x44`，等待 15 ms，再发 `0xCC 0xBE` 读取 9 字节 scratchpad。一次转换或读取失败只发布无效快照，不阻塞 BLE 任务。
+应用启动后先清空传感器/估算器状态，再初始化 BLE common 和静态 GATT profile，避免重启时用上一会话快照构造广播；随后维持温度调度。M601 每个采样周期先发 `0xCC 0x44`，等待 15 ms，再发 `0xCC 0xBE` 读取 9 字节 scratchpad。一次转换或读取失败只发布无效快照，不阻塞 BLE 任务。
 
 ## AC632N 开发板初步诊断
 
@@ -59,7 +60,7 @@ LED 行为如下：
 |---|---|
 | LED1 红 | BLE 未启动熄灭；广播时慢闪；连接后常亮 |
 | LED2 绿 | M601 快照有效常亮；未检测到器件时快闪 |
-| LED3 蓝 | CRC 错误慢闪；范围错误双脉冲；IOKey2 打印状态时短暂闪烁 |
+| LED3 蓝 | CRC 错误慢闪；物理范围/未佩戴双脉冲；IOKey2 打印状态时短暂闪烁 |
 
 IOKey1 按下会依次点亮三色灯完成约 1.2 秒自检；IOKey2 按下会输出一次 BLE/温度快照，不改变 BLE 协议状态。未接跳线的按键应保持释放状态。
 
@@ -79,9 +80,9 @@ profile 使用 `include/core_temp_profile.h` 中的静态 ATT 数据，所有多
 | Device Information / Model Number | `0x180A` / `0x2A24` | Read | `0x0021` | - |
 | Device Information / Firmware Revision | `0x180A` / `0x2A26` | Read | `0x0023` | - |
 
-CORE 温度通知的核心温度是有符号百分之一摄氏度；当前实现只提供核心温度和 Quality & State 字段。没有外部心率时，Quality 使用 `7 (N/A)`，状态表示不支持心率配对；Control Point 只实现协议文档中约定的外部心率输入 `0x13`，其他操作返回“不支持”。无效温度编码为 `0x7FFF`。
+CORE 温度通知的核心温度是有符号百分之一摄氏度；当前实现支持可选皮肤温度、Quality & State 和外部心率字段。默认 `RIDER_CORE_TEMP_PUBLISH_MODE=SHADOW`，稳定接触后自定义 CORE 可以发送皮肤字段；若存在标定候选参数，核心影子估算会记录但核心字段保持 `0x7FFF`，只有经过离线验证并启用 `STRICT` 模式后才发布核心值。Quality 低 4 位反映滤波后的温度信号质量；没有外部心率时，仅心率关联状态表示“支持但未收到信号”。Control Point 只实现协议文档中约定的外部心率输入 `0x13`，其他操作返回“不支持”。核心无效温度编码为 `0x7FFF`。
 
-标准 Health Thermometer 使用 IEEE 11073 FLOAT，分辨率为 `10^-2 °C`；无效值使用 NaN mantissa `0x007FFFFF`。`2A1C` 提供 **Read + Notify**，兼容 DURA 在订阅前主动读取当前值的流程；Temperature Type 由独立的 `2A1D` 读取。CCCD 写响应完成后，固件在 ATT 可发送窗口推送首帧，后续按约 10 秒节拍发送。自定义 CORE `0x2101` 按采样节拍约 1 Hz 发送。profile 保持 CORE 自定义服务在 HTS 之前，但 Central 必须按 UUID 发现服务和特征，不能依赖句柄或服务序号。只有快照有效时才附带 Manufacturer Specific Data 温度字段，广播温度单位为千分之一摄氏度。为避免旧式广播数据更新产生的停播/重启窗口，未连接期间只在测量可用状态改变时刷新广播；每次断开连接后会在 SDK 自动恢复广播前装入最新温度。当前传感器只提供核心温度；皮肤温度没有硬件数据源，平均核心温度属于码表侧历史统计，二者都不会被编码为 0 值伪造。
+标准 Health Thermometer 使用 IEEE 11073 FLOAT，分辨率为 `10^-2 °C`；无效值使用 NaN mantissa `0x007FFFFF`。`2A1C` 提供 **Read + Notify**，兼容 DURA 在订阅前主动读取当前值的流程；Temperature Type 由独立的 `2A1D` 读取。CCCD 写响应完成后，固件在 ATT 可发送窗口推送首帧，后续按约 10 秒节拍发送。自定义 CORE `0x2101` 按采样节拍约 1 Hz 发送。profile 保持 CORE 自定义服务在 HTS 之前，但 Central 必须按 UUID 发现服务和特征，不能依赖句柄或服务序号。只有严格模式下的有效核心估算才附带 Manufacturer Specific Data 温度字段，广播温度单位为千分之一摄氏度。为避免旧式广播数据更新产生的停播/重启窗口，未连接期间只在测量可用状态改变时刷新广播；每次断开连接后会在 SDK 自动恢复广播前装入最新温度。当前传感器只提供接触点温度；稳定阶段可作为皮肤附近温度，核心温度仅是经过参考数据标定的个体化估算。平均核心温度属于码表侧历史统计，未知字段不会被编码为 0 值伪造。算法研究与标定流程见 [`doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md`](../../doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md)。
 
 Battery Level 始终返回协议规定的 `0-100`。当前板级没有独立 fuel-gauge，固件使用 AC632N `AD_CH_VBAT` 的电压估算：默认 `3.30V=0%`、`4.22V=100%`，阈值位于 `board/bd19/board_ac632n_rider_cfg.h`，必须按实际电池和分压校准。该值是电压估算，不代表精确剩余容量。
 
@@ -99,17 +100,32 @@ PB7 (`IO_PORTB_07`) 由 M601 1-Wire 总线独占：
 
 随项目提供的 `doc/ICXL-CoreTemp-Ride/temp_sample` 示例只说明 scratchpad 的 CRC 字段，没有给出多项式。当前驱动采用 Dallas/Maxim CRC-8（多项式反射值 `0x8C`）作为明确的集成假设，并默认开启校验。拿到 M601 正式数据手册后必须确认多项式、初值和温度编码；若不一致，应在本模块内调整并补充测试，不能把当前假设当成已验证事实。
 
-驱动按示例使用 `raw / 256 + 40` 的换算，保存为摄氏百分之一度，并拒绝超出 `-40.00°C` 到 `125.00°C` 的读数。该换算和传感器读数不能直接宣称为真实人体核心体温、皮温或医疗精度数据；当前协议质量始终为 N/A，直到产品定义独立的接触/置信度来源。
+驱动按示例使用 `raw / 256 + 40` 的换算，保存为摄氏百分之一度，并拒绝超出 `-40.00°C` 到 `125.00°C` 的读数。该换算和传感器读数不能直接宣称为真实人体核心体温、皮温或医疗精度数据；协议 Quality 由滤波后的连续性、斜率和佩戴状态给出，核心估算仍必须通过独立参考数据的置信度门控。
+
+### 佩戴有效区间和断报处理
+
+`-40.00°C` 到 `125.00°C` 是 M601 的电气/物理读数范围，不是佩戴判定。应用估算层另用默认 `30.00°C` 到 `45.00°C` 的产品区间过滤环境读数；例如脱离人体后常见的 `23.00°C` 会被标记为 `RIDER_TEMP_STATUS_NOT_WORN`（status=4），不会成为有效核心温度。该区间定义在 `include/rider_core_temp.h`，量产时可按结构和实测校准。
+
+无设备、CRC 错误、物理范围错误、未佩戴、未完成预热或连续约 3 秒没有新序号的样本都会保留为无效快照并进入 `STALE`：ATT Read 返回协议规定的无效哨兵值；稳定接触后，自定义 CORE 可发送皮肤字段，但核心字段仍为 `0x7FFF`，HTS 和温度广播在核心估算有效前不发送。兼容旧码表的 `CONTACT_PROXY` 也只接受稳定接触，不会把预热读数当成体温。这样码表不会把断报或 `23°C` 当成低温样本参与平均；平均温度仍由码表对有效历史样本自行统计。
 
 ## 串口诊断日志
 
 板级 UART0 调试输出为 `IO_PORTA_00`（PA0，TX）、`1000000 baud`、8N1。使用 USB-UART 转接器时，将转接器 RX 接 PA0、GND 共地。日志通过现有 `log_info`/`put_buf` 路径输出，重点前缀如下：
 
 - `[RIDER_TEMP]`：M601 presence、转换启动、9 字节 scratchpad、CRC 期望值/收到值、原始温度和状态。
-- `[RIDER_ESTIMATOR]`：采样序号、有效性、状态和协议快照；`skin=NA average=NA` 是有意的能力边界，不是把未知值当成 0。
+- `[RIDER_ESTIMATOR]`：采样序号、接触/皮肤温度、核心估算有效性、质量、置信度、佩戴状态和新鲜度；核心估算在影子模式下只记录，不发送。
 - `[RIDER_GATT]`：ATT 读/写、CCCD、CORE/HTS 读值和通知帧、广播主包与扫描响应原始字节。
 
-串口中 `ble=0/1/2` 分别表示未启动、广播、已连接；`core_centi=3650` 表示 `36.50°C`。`status=0` 表示 M601 样本通过 CRC 和范围检查；`status=1/2/3` 分别表示无设备、CRC 错误、范围错误。无效核心温度统一打印为 `NA(32767)`，皮肤温度和平均温度打印为 `NA`，不会把未知字段伪装成 `0°C`。若持续出现 `status=2`，应优先核对 M601 CRC 多项式和 PB7 上拉/时序；若持续出现 `status=1`，应核对 PB7 连线、外部上拉和传感器供电。
+串口中 `ble=0/1/2` 分别表示未启动、广播、已连接；`contact_centi=3650` 表示滤波后的接触点温度 `36.50°C`，`core_est_centi=NA(32767)` 表示核心估算尚未通过校准。M601 原始采样的 `status=0` 表示通过 CRC 和物理范围；估算器快照的 `state=0/1/2/3/4` 分别表示无设备、未佩戴、预热、稳定、陈旧，`freshness=0/1/2` 分别表示不可用、最新、陈旧。无效核心温度统一打印为 `NA(32767)`，不会把未知字段伪装成 `0°C`。若持续出现 `status=2`，应优先核对 M601 CRC 多项式和 PB7 上拉/时序；若持续出现 `status=1`，应核对 PB7 连线、外部上拉和传感器供电；若持续出现 `status=4`，应确认传感器贴合位置并按实际佩戴曲线校准区间。
+
+单 M601 核心估算的离线拟合、连续留出时段验证和 `<=0.5°C` 误差门槛见 [`单 M601 温度算法研究与验证`](../../doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md)。未通过门槛时保持 `RIDER_CORE_TEMP_PUBLISH_MODE=SHADOW`，不要把生成的参数 header 接入量产构建。
+
+标定 CSV 如果包含多次实验，应使用 `session_id` 并按完整时段留出，例如
+`python3 tools/rider_core_temp_calibrate.py samples.csv --holdout-session exercise`；这会避免同一运动时段同时出现在拟合集和验证集。滤波状态机和标定工具的主机回归统一运行：
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p 'test_*.py'
+```
 
 ## 构建和验证
 
@@ -139,7 +155,7 @@ ac632n-workbench-cli.exe flash --project <project-dir>
 
 CLion 代码索引目标为 `ac632n_rider_core_temp_indexing`，固件链接仍由 `apps/rider_core_temp/board/bd19/Makefile` 负责。当前开发机若未安装杰理 q32s 工具链（`clang`、`lto-wrapper`、`lto-ar`），只能完成 Make dry-run、CMake 配置和主机侧语法/索引检查，不能声称固件已完成链接或可烧录。
 
-硬件验收必须至少覆盖：广播服务 UUID 和名称、连接/断连、温度与标准体温 CCCD、Control Point indication（连续写入应返回 busy）、无设备/CRC 错误、PB7 上拉和长线时序，以及 VBAT ADC/电池百分比阈值校准。
+硬件验收必须至少覆盖：广播服务 UUID 和名称、连接/断连、温度与标准体温 CCCD、Control Point indication（连续写入应返回 busy）、无设备/CRC 错误、`23°C` 脱落、单点尖峰、连续断报/重新佩戴、预热到稳定状态、CORE Flags/皮温字段、核心 `0x7FFF` 和 HTS NaN 编码、PB7 上拉和长线时序，以及 VBAT ADC/电池百分比阈值校准。
 
 ## 扩展方式和禁止事项
 

@@ -81,14 +81,14 @@ void bt_ble_before_start_init(void)
     rider_core_temp_gatt_before_init();
 }
 
-/** Register profile, enable advertising and begin sensor sampling. */
+/** Reset sensor state before constructing any profile or advertisement data. */
 void bt_ble_init(void)
 {
+    /* The scheduler owns sensor/estimator initialization.  It must run first
+     * so a BLE restart cannot advertise a snapshot from the prior session. */
+    rider_core_temp_start_scheduler();
     rider_core_temp_gatt_init();
     ble_module_enable(1);
-    /* The scheduler owns sensor/estimator initialization so a restart clears
-     * stale samples exactly once before the first conversion is queued. */
-    rider_core_temp_start_scheduler();
     rider_board_diag_init();
 }
 

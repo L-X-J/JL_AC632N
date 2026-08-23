@@ -113,7 +113,7 @@ AGENT.md            架构约束真相源
 
 ### Rider CoreTemp 固件
 
-进入 `apps/rider_core_temp` 后，可使用 `make ac632n_rider_core_temp` 构建独立固件。应用只启用 BLE 外设角色，设备名固定为 `ICXL-RTemp`；PB7 由 `modules/temp/m601_1wire.c` 独占，BLE profile 和广播由 `modules/bt/core_temp_gatt.c` 提供，J12 LED/按键诊断由 `modules/diag/rider_board_diag.c` 提供。开发板 J12 需要跳线到 MCU GPIO，LED 可显示广播/连接和 M601 错误状态，IOKey2 可触发串口快照；具体脚位和日志格式见 [Rider CoreTemp 模块说明](./apps/rider_core_temp/README.md)。协议字段、温度帧和 Control Point 约束见 [CORE2 BLE 协议说明](./doc/ICXL-CoreTemp-Ride/CORE2_BLE_协议说明.md)。
+进入 `apps/rider_core_temp` 后，可使用 `make ac632n_rider_core_temp` 构建独立固件。应用只启用 BLE 外设角色，设备名固定为 `ICXL-RTemp`；PB7 由 `modules/temp/m601_1wire.c` 独占，`modules/temp/rider_temp_filter.c` 负责滤波和佩戴状态，BLE profile 和广播由 `modules/bt/core_temp_gatt.c` 提供，J12 LED/按键诊断由 `modules/diag/rider_board_diag.c` 提供。默认 `30~45°C` 佩戴区间会过滤脱离人体的环境温度，断报/无效样本不会作为温度通知上报，平均温度仍由码表对有效样本统计。单 M601 核心估算默认处于影子模式，须通过留出时段验证后才可启用严格发布。开发板 J12 需要跳线到 MCU GPIO，LED 可显示广播/连接和 M601 错误状态，IOKey2 可触发串口快照；具体脚位和日志格式见 [Rider CoreTemp 模块说明](./apps/rider_core_temp/README.md)。算法研究、标定和验证见 [单 M601 温度算法研究与验证](./doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md)。协议字段、温度帧和 Control Point 约束见 [CORE2 BLE 协议说明](./doc/ICXL-CoreTemp-Ride/CORE2_BLE_协议说明.md)。
 
 蓝牙官方认证
 -------------

@@ -102,18 +102,26 @@ static void rider_diag_log_state(const rider_temperature_snapshot_t *snapshot,
         return;
     }
     if (rider_diag_last_ble_state == (u8)ble_state &&
-        rider_diag_last_temp_valid == snapshot->valid &&
+        rider_diag_last_temp_valid == snapshot->contact_valid &&
         rider_diag_last_temp_status == snapshot->sensor_status) {
         return;
     }
     rider_diag_last_ble_state = (u8)ble_state;
-    rider_diag_last_temp_valid = snapshot->valid;
+    rider_diag_last_temp_valid = snapshot->contact_valid;
     rider_diag_last_temp_status = snapshot->sensor_status;
-    log_info("state: ble=%u temp_valid=%u temp_status=%u seq=%u core_centi=%d "
-             "skin=NA average=NA\n",
-             (unsigned)ble_state, (unsigned)snapshot->valid,
-             (unsigned)snapshot->sensor_status, (unsigned)snapshot->sequence,
-             snapshot->valid ? (int)snapshot->core_temperature_centi : 32767);
+    log_info("state: ble=%u contact_valid=%u core_valid=%u core_verified=%u "
+             "status=%u state=%u freshness=%u seq=%u contact_centi=%d "
+             "skin_centi=%d core_centi=%d\n",
+             (unsigned)ble_state, (unsigned)snapshot->contact_valid,
+             (unsigned)snapshot->core_estimate_valid,
+             (unsigned)snapshot->core_estimate_verified,
+             (unsigned)snapshot->sensor_status,
+             (unsigned)snapshot->temperature_state,
+             (unsigned)snapshot->data_freshness,
+             (int)snapshot->sequence,
+             snapshot->contact_valid ? (int)snapshot->contact_temperature_centi : 32767,
+             snapshot->skin_valid ? (int)snapshot->skin_temperature_centi : 32767,
+             snapshot->core_estimate_valid ? (int)snapshot->core_temperature_centi : 32767);
 }
 
 /** Render the one-button LED self-test sequence. */
@@ -139,7 +147,7 @@ static void rider_diag_render_led_test(void)
 static void rider_diag_render_status(const rider_temperature_snapshot_t *snapshot,
                                      enum rider_ble_state ble_state)
 {
-    u8 sensor_fault = snapshot && !snapshot->valid;
+    u8 sensor_fault = snapshot && !snapshot->contact_valid;
 
     rider_diag_leds_off();
 
@@ -152,7 +160,7 @@ static void rider_diag_render_status(const rider_temperature_snapshot_t *snapsho
     }
 
     /* Green LED2 is the sensor state; a valid sample is steady, no device is fast. */
-    if (snapshot && snapshot->valid) {
+    if (snapshot && snapshot->contact_valid) {
         rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, 1);
     } else if (sensor_fault && snapshot->sensor_status == RIDER_TEMP_STATUS_NO_DEVICE) {
         rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT,
@@ -165,7 +173,8 @@ static void rider_diag_render_status(const rider_temperature_snapshot_t *snapsho
         rider_diag_led_set(RIDER_BOARD_DIAG_LED3_PORT,
                            (rider_diag_tick_count % 10) < 5);
     } else if (snapshot && sensor_fault &&
-               snapshot->sensor_status == RIDER_TEMP_STATUS_RANGE_ERROR) {
+               (snapshot->sensor_status == RIDER_TEMP_STATUS_RANGE_ERROR ||
+                snapshot->sensor_status == RIDER_TEMP_STATUS_NOT_WORN)) {
         rider_diag_led_set(RIDER_BOARD_DIAG_LED3_PORT,
                            (rider_diag_tick_count % 10 == 0) ||
                            (rider_diag_tick_count % 10 == 2));
@@ -182,11 +191,22 @@ static void rider_diag_dump_state(void)
     enum rider_ble_state ble_state = rider_core_temp_ble_state();
 
     rider_estimator_copy_snapshot(&snapshot);
-    log_info("button dump: ble=%u temp_valid=%u status=%u seq=%u core_centi=%d "
-             "skin=NA average=NA\n",
-             (unsigned)ble_state, (unsigned)snapshot.valid,
-             (unsigned)snapshot.sensor_status, (unsigned)snapshot.sequence,
-             snapshot.valid ? (int)snapshot.core_temperature_centi : 32767);
+    log_info("button dump: ble=%u contact_valid=%u skin_valid=%u core_valid=%u "
+             "core_verified=%u status=%u state=%u freshness=%u seq=%u "
+             "contact_centi=%d "
+             "skin_centi=%d core_centi=%d confidence=%u\n",
+             (unsigned)ble_state, (unsigned)snapshot.contact_valid,
+             (unsigned)snapshot.skin_valid,
+             (unsigned)snapshot.core_estimate_valid,
+             (unsigned)snapshot.core_estimate_verified,
+             (unsigned)snapshot.sensor_status,
+             (unsigned)snapshot.temperature_state,
+             (unsigned)snapshot.data_freshness,
+             (unsigned)snapshot.sequence,
+             snapshot.contact_valid ? (int)snapshot.contact_temperature_centi : 32767,
+             snapshot.skin_valid ? (int)snapshot.skin_temperature_centi : 32767,
+             snapshot.core_estimate_valid ? (int)snapshot.core_temperature_centi : 32767,
+             (unsigned)snapshot.confidence);
 }
 
 /** Handle a debounced button press without changing product protocol state. */

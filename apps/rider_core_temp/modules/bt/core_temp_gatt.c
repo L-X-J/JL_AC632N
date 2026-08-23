@@ -20,7 +20,7 @@
 #define RIDER_ATT_CBUFFER_SIZE          512
 #define RIDER_STANDARD_PERIOD_SECONDS   10
 #define RIDER_EXTERNAL_HR_TIMEOUT       15
-#define RIDER_CORE_FRAME_MAX            5
+#define RIDER_CORE_FRAME_MAX            9
 #define RIDER_STANDARD_TEMPERATURE_FRAME_SIZE 5
 
 static u8 rider_adv_data[RIDER_ADV_PACKET_MAX];
@@ -40,6 +40,56 @@ static u8 rider_battery_pending;
 static u8 rider_last_battery_level;
 static u8 rider_battery_level_valid;
 
+/** Return whether a stable contact value can be sent in the custom CORE frame.
+ * The frame may still carry a 0x7FFF core field while the estimator is shadow
+ * only; standard HTS and the beacon use the stricter core predicate below. */
+static u8 rider_temperature_notification_allowed(
+    const rider_temperature_snapshot_t *snapshot)
+{
+    return snapshot && snapshot->skin_valid;
+}
+
+/** Return whether the configured CORE projection has a core-like value. */
+static u8 rider_core_frame_value_available(
+    const rider_temperature_snapshot_t *snapshot)
+{
+    if (!snapshot) {
+        return 0;
+    }
+#if RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_STRICT
+    return snapshot->core_estimate_valid && snapshot->core_estimate_verified;
+#elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
+    return snapshot->contact_valid && snapshot->skin_valid;
+#else
+    return 0;
+#endif
+}
+
+/** Select the mandatory CORE field without hiding the shadow-mode sentinel. */
+static int16_t rider_core_frame_value(
+    const rider_temperature_snapshot_t *snapshot)
+{
+    if (!snapshot) {
+        return 0x7fff;
+    }
+#if RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_STRICT
+    return snapshot->core_estimate_valid && snapshot->core_estimate_verified
+               ? snapshot->core_temperature_centi : 0x7fff;
+#elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
+    return snapshot->contact_valid && snapshot->skin_valid
+               ? snapshot->contact_temperature_centi : 0x7fff;
+#else
+    return 0x7fff;
+#endif
+}
+
+/** Return whether the standard HTS characteristic can publish core data. */
+static u8 rider_standard_temperature_allowed(
+    const rider_temperature_snapshot_t *snapshot)
+{
+    return snapshot && rider_core_frame_value_available(snapshot);
+}
+
 static uint16_t rider_att_read_callback(hci_con_handle_t connection_handle,
                                         uint16_t att_handle,
                                         uint16_t offset,
@@ -57,22 +107,28 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
 static void rider_log_temperature_snapshot(const char *stage,
                                            const rider_temperature_snapshot_t *snapshot)
 {
-    if (!snapshot || !snapshot->valid) {
-        log_info("Rider temperature %s: seq=%u valid=0 status=%u core=NA(32767) "
-                 "skin=NA average=NA quality=%u\n",
-                 stage ? stage : "unknown",
-                 snapshot ? (unsigned)snapshot->sequence : 0,
-                 snapshot ? (unsigned)snapshot->sensor_status : 0,
-                 snapshot ? (unsigned)snapshot->quality : 7);
-        return;
-    }
-
-    log_info("Rider temperature %s: seq=%u valid=1 status=%u core_centi=%d "
-             "skin=NA average=NA quality=%u\n",
-             stage, (unsigned)snapshot->sequence,
-             (unsigned)snapshot->sensor_status,
-             (int)snapshot->core_temperature_centi,
-             (unsigned)snapshot->quality);
+    log_info("Rider temperature %s: seq=%u valid=%u status=%u state=%u "
+             "freshness=%u contact_centi=%d skin_centi=%d core_est_centi=%d "
+             "contact_valid=%u skin_valid=%u core_valid=%u core_verified=%u "
+             "quality=%u confidence=%u\n",
+             stage ? stage : "unknown",
+             snapshot ? (unsigned)snapshot->sequence : 0,
+             snapshot ? (unsigned)snapshot->valid : 0,
+             snapshot ? (unsigned)snapshot->sensor_status : 0,
+             snapshot ? (unsigned)snapshot->temperature_state : 0,
+             snapshot ? (unsigned)snapshot->data_freshness : 0,
+             snapshot && snapshot->contact_valid
+                 ? (int)snapshot->contact_temperature_centi : 32767,
+             snapshot && snapshot->skin_valid
+                 ? (int)snapshot->skin_temperature_centi : 32767,
+             snapshot && snapshot->core_estimate_valid
+                 ? (int)snapshot->core_temperature_centi : 32767,
+             snapshot ? (unsigned)snapshot->contact_valid : 0,
+             snapshot ? (unsigned)snapshot->skin_valid : 0,
+             snapshot ? (unsigned)snapshot->core_estimate_valid : 0,
+             snapshot ? (unsigned)snapshot->core_estimate_verified : 0,
+             snapshot ? (unsigned)snapshot->quality : RIDER_TEMP_QUALITY_NA,
+             snapshot ? (unsigned)snapshot->confidence : 0);
 }
 
 /** Log the ATT operation shape and a bounded payload prefix for hardware tests. */
@@ -278,25 +334,40 @@ static void rider_refresh_battery(void)
 static u16 rider_make_core_frame(u8 *frame, u16 frame_size,
                                  const rider_temperature_snapshot_t *snapshot)
 {
-    int16_t core = 0x7fff;
-    u8 flags = 0x04; /* Quality & State is present; core temperature is mandatory. */
-    u8 quality_state = 0x07; /* quality N/A + HR pairing is not supported */
+    int16_t core = rider_core_frame_value(snapshot);
+    int16_t skin = 0x7fff;
+    u8 flags = 0x04; /* Quality & State is present; core is mandatory. */
+    u8 quality_state = snapshot ? (snapshot->quality & 0x0f) : 0x07;
     u16 length = 0;
 
     if (!frame || frame_size < 4) {
         return 0;
     }
-    if (snapshot && snapshot->valid) {
-        core = snapshot->core_temperature_centi;
+    /* Control Point 0x13 is implemented, so distinguish "supported but no
+     * signal" (01) from "not supported" (00) in the quality high nibble. */
+    quality_state |= 0x10;
+    if (snapshot && snapshot->skin_valid) {
+        flags |= 0x01;
+        skin = snapshot->skin_temperature_centi;
     }
     if (snapshot && snapshot->heart_rate_valid) {
         flags |= 0x10;
-        quality_state = 0x27; /* quality N/A + HR supported and receiving */
+        quality_state = (quality_state & (u8)~0x30) | 0x20;
     }
 
     frame[length++] = flags;
     frame[length++] = (u8)core;
     frame[length++] = (u8)((u16)core >> 8);
+    if (flags & 0x01) {
+        if (frame_size < length + 2) {
+            return 0;
+        }
+        frame[length++] = (u8)skin;
+        frame[length++] = (u8)((u16)skin >> 8);
+    }
+    if (frame_size < length + 1) {
+        return 0;
+    }
     frame[length++] = quality_state;
     if (flags & 0x10) {
         if (frame_size < length + 1) {
@@ -342,14 +413,14 @@ static u16 rider_make_standard_temperature(u8 *value, u16 value_size,
         return 0;
     }
     value[0] = 0x04; /* Celsius; CORE keeps the type-present flag for 0x2A1D. */
-    if (!snapshot || !snapshot->valid) {
+    if (!snapshot || !rider_standard_temperature_allowed(snapshot)) {
         mantissa = 0x007fffff; /* IEEE-11073 FLOAT NaN mantissa. */
         value[1] = (u8)mantissa;
         value[2] = (u8)(mantissa >> 8);
         value[3] = (u8)(mantissa >> 16);
         value[4] = 0;
-    } else {
-        mantissa = snapshot->core_temperature_centi;
+    } else if (rider_standard_temperature_allowed(snapshot)) {
+        mantissa = rider_core_frame_value(snapshot);
         value[1] = (u8)mantissa;
         value[2] = (u8)(mantissa >> 8);
         value[3] = (u8)(mantissa >> 16);
@@ -393,9 +464,21 @@ static int rider_send_standard_temperature_now(void)
 static u8 rider_try_send_pending_measurements(void)
 {
     u8 sent = 0;
+    rider_temperature_snapshot_t snapshot;
+
+    rider_estimator_copy_snapshot(&snapshot);
 
     if (rider_core_temperature_pending) {
-        int result = rider_send_core_temperature_now();
+        int result;
+
+        if (!rider_temperature_notification_allowed(&snapshot)) {
+            log_info("Rider first CORE temperature skipped: no stable contact status=%u\n",
+                     (unsigned)snapshot.sensor_status);
+            rider_core_temperature_pending = 0;
+            result = GATT_OP_RET_SUCESS;
+        } else {
+            result = rider_send_core_temperature_now();
+        }
         log_info("Rider first CORE temperature: ret=%d ccc=%04x\n",
                  result, ble_gatt_server_characteristic_ccc_get(
                      rider_connection_handle, RIDER_ATT_CORE_TEMPERATURE_CCC_HANDLE));
@@ -405,7 +488,17 @@ static u8 rider_try_send_pending_measurements(void)
         }
     }
     if (rider_standard_temperature_pending) {
-        int result = rider_send_standard_temperature_now();
+        int result;
+
+        if (!rider_standard_temperature_allowed(&snapshot)) {
+            /* Keep the HTS read path's NaN sentinel, but do not notify it. */
+            log_info("Rider first HTS temperature skipped: unavailable status=%u\n",
+                     (unsigned)snapshot.sensor_status);
+            rider_standard_temperature_pending = 0;
+            result = GATT_OP_RET_SUCESS;
+        } else {
+            result = rider_send_standard_temperature_now();
+        }
         log_info("Rider first HTS temperature: ret=%d ccc=%04x\n",
                  result, ble_gatt_server_characteristic_ccc_get(
                      rider_connection_handle, RIDER_ATT_STANDARD_TEMPERATURE_CCC_HANDLE));
@@ -448,8 +541,8 @@ static void rider_make_advertisement(const rider_temperature_snapshot_t *snapsho
     offset += sizeof(rider_core_service_uuid128);
 
     /* The documented beacon has no unavailable sentinel; omit it until valid. */
-    if (snapshot && snapshot->valid) {
-        int32_t milli = (int32_t)snapshot->core_temperature_centi * 10;
+    if (snapshot && rider_core_frame_value_available(snapshot)) {
+        int32_t milli = (int32_t)rider_core_frame_value(snapshot) * 10;
         if (milli >= 0 && milli <= 0xffff) {
             u16 temperature_milli = (u16)milli;
             rider_adv_data[offset++] = 7;
@@ -502,8 +595,8 @@ static void rider_make_advertisement(const rider_temperature_snapshot_t *snapsho
  */
 static void rider_refresh_advertisement(const rider_temperature_snapshot_t *snapshot)
 {
-    u8 valid = (snapshot && snapshot->valid) ? 1 : 0;
-    int16_t core = valid ? snapshot->core_temperature_centi : 0;
+    u8 valid = (snapshot && rider_core_frame_value_available(snapshot)) ? 1 : 0;
+    int16_t core = valid ? rider_core_frame_value(snapshot) : 0;
     u8 availability_changed = valid != rider_last_adv_valid;
 
     if (availability_changed && rider_gatt_ready && !rider_connection_handle) {
@@ -819,7 +912,8 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
                  * extra stop/start cycle. */
                 rider_estimator_copy_snapshot(&snapshot);
                 rider_make_advertisement(&snapshot);
-                rider_last_adv_valid = snapshot.valid ? 1 : 0;
+                rider_last_adv_valid =
+                    rider_core_frame_value_available(&snapshot) ? 1 : 0;
             }
         }
         break;
@@ -903,7 +997,7 @@ void rider_core_temp_gatt_init(void)
     ble_gatt_server_set_profile(rider_core_temp_profile_data,
                                 sizeof(rider_core_temp_profile_data));
     rider_make_advertisement(&snapshot);
-    rider_last_adv_valid = snapshot.valid ? 1 : 0;
+    rider_last_adv_valid = rider_core_frame_value_available(&snapshot) ? 1 : 0;
     ble_gatt_server_set_adv_config(&rider_adv_config);
 }
 
@@ -976,19 +1070,22 @@ void rider_core_temp_ble_tick(void)
     pending_sent = rider_try_send_pending_measurements();
     rider_try_send_pending_cp_response();
 
-    core_frame_len = rider_make_core_frame(core_frame, sizeof(core_frame), &snapshot);
-    log_info("Rider CORE frame: len=%u handle=%04x\n", core_frame_len,
-             RIDER_ATT_CORE_TEMPERATURE_VALUE_HANDLE);
-    put_buf(core_frame, core_frame_len);
-    if (!(pending_sent & BIT(0))) {
-        rider_send_subscribed_value(rider_connection_handle,
-                                    RIDER_ATT_CORE_TEMPERATURE_VALUE_HANDLE,
-                                    RIDER_ATT_CORE_TEMPERATURE_CCC_HANDLE,
-                                    GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION,
-                                    core_frame, core_frame_len);
+    if (rider_temperature_notification_allowed(&snapshot)) {
+        core_frame_len = rider_make_core_frame(core_frame, sizeof(core_frame), &snapshot);
+        log_info("Rider CORE frame: len=%u handle=%04x\n", core_frame_len,
+                 RIDER_ATT_CORE_TEMPERATURE_VALUE_HANDLE);
+        put_buf(core_frame, core_frame_len);
+        if (!(pending_sent & BIT(0))) {
+            rider_send_subscribed_value(rider_connection_handle,
+                                        RIDER_ATT_CORE_TEMPERATURE_VALUE_HANDLE,
+                                        RIDER_ATT_CORE_TEMPERATURE_CCC_HANDLE,
+                                        GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION,
+                                        core_frame, core_frame_len);
+        }
     }
 
-    if ((rider_tick_count % RIDER_STANDARD_PERIOD_SECONDS) == 0) {
+    if (rider_standard_temperature_allowed(&snapshot) &&
+        (rider_tick_count % RIDER_STANDARD_PERIOD_SECONDS) == 0) {
         standard_value_len = rider_make_standard_temperature(standard_value,
                                                               sizeof(standard_value),
                                                               &snapshot);

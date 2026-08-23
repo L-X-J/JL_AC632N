@@ -155,6 +155,7 @@ c_SRC_FILES := \
 	../../../../apps/rider_core_temp/modules/main/rider_core_temp_app.c \
 	../../../../apps/rider_core_temp/modules/system/rider_user_cfg.c \
 	../../../../apps/rider_core_temp/modules/temp/m601_1wire.c \
+	../../../../apps/rider_core_temp/modules/temp/rider_temp_filter.c \
 	../../../../apps/rider_core_temp/modules/temp/rider_core_estimator.c \
 	../../../../apps/rider_core_temp/board/bd19/board_ac632n_rider.c \
 	../../../../cpu/bd19/adc_api.c \
