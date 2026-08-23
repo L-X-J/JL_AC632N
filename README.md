@@ -113,7 +113,7 @@ AGENT.md            架构约束真相源
 
 ### Rider CoreTemp 固件
 
-进入 `apps/rider_core_temp` 后，可使用 `make ac632n_rider_core_temp` 构建独立固件。应用只启用 BLE 外设角色，设备名固定为 `ICXL-CoreTemp-Rider`；PB7 由 `modules/temp/m601_1wire.c` 独占，BLE profile 和广播由 `modules/bt/core_temp_gatt.c` 提供，J12 LED/按键诊断由 `modules/diag/rider_board_diag.c` 提供。开发板 J12 需要跳线到 MCU GPIO，LED 可显示广播/连接和 M601 错误状态，IOKey2 可触发串口快照；具体脚位和日志格式见 [Rider CoreTemp 模块说明](./apps/rider_core_temp/README.md)。协议字段、温度帧和 Control Point 约束见 [CORE2 BLE 协议说明](./doc/ICXL-CoreTemp-Ride/CORE2_BLE_协议说明.md)。
+进入 `apps/rider_core_temp` 后，可使用 `make ac632n_rider_core_temp` 构建独立固件。应用只启用 BLE 外设角色，设备名固定为 `ICXL-RTemp`；PB7 由 `modules/temp/m601_1wire.c` 独占，BLE profile 和广播由 `modules/bt/core_temp_gatt.c` 提供，J12 LED/按键诊断由 `modules/diag/rider_board_diag.c` 提供。开发板 J12 需要跳线到 MCU GPIO，LED 可显示广播/连接和 M601 错误状态，IOKey2 可触发串口快照；具体脚位和日志格式见 [Rider CoreTemp 模块说明](./apps/rider_core_temp/README.md)。协议字段、温度帧和 Control Point 约束见 [CORE2 BLE 协议说明](./doc/ICXL-CoreTemp-Ride/CORE2_BLE_协议说明.md)。
 
 蓝牙官方认证
 -------------

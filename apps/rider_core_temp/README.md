@@ -4,7 +4,7 @@
 
 `apps/rider_core_temp` 是 AC632N（bd19）上的独立 BLE 外设应用。它只负责 Rider CoreTemp 产品的应用编排、CORE 兼容 GATT 协议、M601 温度传感器适配和产品级板卡配置；不复用 `apps/spp_and_le` 的产品源文件，也不把产品协议放入 `apps/common` 或 `cpu/bd19`。
 
-设备名固定为 `ICXL-CoreTemp-Rider`，只启用 BLE 外设角色：经典蓝牙、SPP、BLE Client、USB、音频、充电和演示按键逻辑均关闭。广播按 CORE 官方实现说明布局：主广播包含 Flags、`0x1809`、兼容名称 `CORE` 和有效时的 Manufacturer Data；主动扫描响应包含 `0x180A`、`0x180F` 与 Core 128-bit Service UUID。完整产品名仍通过 GAP/GATT 设备名提供，连接阶段必须按 GATT UUID 发现服务，不依赖广播名称或服务序号。CORE 的公开 GATT 特征安全权限为 None；Security Manager 只被动响应 Central 发起的无输入/无输出 Just Works，不主动发起配对、不要求 PIN 或人工确认。
+设备名固定为 `ICXL-RTemp`，只启用 BLE 外设角色：经典蓝牙、SPP、BLE Client、USB、音频、充电和演示按键逻辑均关闭。为兼容 DURA/COROS 的扫描后连接流程，主广播包含 Flags、Core 128-bit Service UUID 和有效时的 Manufacturer Data；主动扫描响应包含 `0x1809` 与完整设备名。连接阶段必须按 GATT UUID 发现服务，不依赖广播名称或服务序号。CORE 的公开 GATT 特征安全权限为 None；Security Manager 只被动响应 Central 发起的无输入/无输出 Just Works，不主动发起配对、不要求 PIN 或人工确认。
 
 ## 目录结构
 
@@ -81,7 +81,7 @@ profile 使用 `include/core_temp_profile.h` 中的静态 ATT 数据，所有多
 
 CORE 温度通知的核心温度是有符号百分之一摄氏度；当前实现只提供核心温度和 Quality & State 字段。没有外部心率时，Quality 使用 `7 (N/A)`，状态表示不支持心率配对；Control Point 只实现协议文档中约定的外部心率输入 `0x13`，其他操作返回“不支持”。无效温度编码为 `0x7FFF`。
 
-标准 Health Thermometer 使用 IEEE 11073 FLOAT，分辨率为 `10^-2 °C`；无效值使用 NaN mantissa `0x007FFFFF`。`2A1C` 提供 **Read + Notify**，兼容 DURA 在订阅前主动读取当前测量值的流程；Temperature Type 由独立的 `2A1D` 读取。CCCD 写响应完成后，固件在 ATT 可发送窗口推送首帧，后续按官方约 10 秒节拍发送。自定义 CORE `0x2101` 按采样节拍约 1 Hz 发送。profile 保持 CORE 自定义服务在 HTS 之前，但 Central 必须按 UUID 发现服务和特征，不能依赖句柄或服务序号。只有快照有效时才附带 Manufacturer Specific Data 温度字段，广播温度单位为千分之一摄氏度。当前传感器只提供核心温度；皮肤温度没有硬件数据源，平均核心温度属于码表侧历史统计，二者都不会被编码为 0 值伪造。
+标准 Health Thermometer 使用 IEEE 11073 FLOAT，分辨率为 `10^-2 °C`；无效值使用 NaN mantissa `0x007FFFFF`。`2A1C` 提供 **Read + Notify**，兼容 DURA 在订阅前主动读取当前值的流程；Temperature Type 由独立的 `2A1D` 读取。CCCD 写响应完成后，固件在 ATT 可发送窗口推送首帧，后续按约 10 秒节拍发送。自定义 CORE `0x2101` 按采样节拍约 1 Hz 发送。profile 保持 CORE 自定义服务在 HTS 之前，但 Central 必须按 UUID 发现服务和特征，不能依赖句柄或服务序号。只有快照有效时才附带 Manufacturer Specific Data 温度字段，广播温度单位为千分之一摄氏度。为避免旧式广播数据更新产生的停播/重启窗口，未连接期间只在测量可用状态改变时刷新广播；每次断开连接后会在 SDK 自动恢复广播前装入最新温度。当前传感器只提供核心温度；皮肤温度没有硬件数据源，平均核心温度属于码表侧历史统计，二者都不会被编码为 0 值伪造。
 
 Battery Level 始终返回协议规定的 `0-100`。当前板级没有独立 fuel-gauge，固件使用 AC632N `AD_CH_VBAT` 的电压估算：默认 `3.30V=0%`、`4.22V=100%`，阈值位于 `board/bd19/board_ac632n_rider_cfg.h`，必须按实际电池和分压校准。该值是电压估算，不代表精确剩余容量。
 

@@ -68,7 +68,7 @@ void btstack_ble_exit(int param);
 int bt_comm_ble_status_event_handler(struct bt_event *bt);
 int bt_comm_ble_hci_event_handler(struct bt_event *bt);
 
-#define RIDER_CORE_TEMP_NAME "ICXL-CoreTemp-Rider"
+#define RIDER_CORE_TEMP_NAME "ICXL-RTemp"
 #define RIDER_CORE_TEMP_MANUFACTURER "ICXL"
 #define RIDER_CORE_TEMP_MODEL "CoreTemp-Rider"
 #define RIDER_CORE_TEMP_FIRMWARE_VERSION "0.1.0"

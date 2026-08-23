@@ -30,7 +30,7 @@ CORE 2 通过 BLE 提供三种获取核心体温的方式：
 00004200-F366-40B2-AC37-70CCE0AA83B1
 ```
 
-官方 CORE 设备名通常为 `CORE`（可能随设备状态附带后缀），但不建议只通过设备名识别。本项目固件使用产品名 `ICXL-CoreTemp-Rider`，连接端仍应按服务 UUID 识别。
+官方 CORE 设备名通常为 `CORE`（可能随设备状态附带后缀），但不建议只通过设备名识别。本项目固件使用产品名 `ICXL-RTemp`，连接端仍应按服务 UUID 识别。
 
 ### 2.2 广播内容
 
@@ -43,9 +43,9 @@ CORE 2 通过 BLE 提供三种获取核心体温的方式：
 | `0x09` | Complete Local Name，官方设备通常为 `CORE` |
 | `0xFF` | Manufacturer Specific Data，携带 beacon 核心温度 |
 
-自定义 CoreTemp Service 的 128-bit UUID 主要出现在主动扫描响应中；因此扫描端应采用 **active scan**。
+官方设备的自定义 CoreTemp Service 128-bit UUID 可能只出现在主动扫描响应中，因此通用扫描端仍建议采用 **active scan**；本项目固件则将该 UUID 放在主广播包中以兼容扫描后立即连接的 Central。
 
-本项目按 CORE 官方连接说明采用相同的广播分工：主广播包含 Flags、`0x1809`、兼容名称 `CORE`，以及有效温度时的 Manufacturer Data；主动扫描响应包含 `0x180A`、`0x180F` 和完整 Core 128-bit Service UUID。完整产品名 `ICXL-CoreTemp-Rider` 通过 GAP/GATT 设备名提供。扫描端应启用 active scan，并按 `...2100` 服务 UUID 识别，不能依赖广播名称。
+本项目为兼容 DURA/COROS 的扫描后连接流程，主广播包含 Flags、完整 Core 128-bit Service UUID，以及有效温度时的 Manufacturer Data；主动扫描响应包含 `0x1809` 和完整产品名 `ICXL-RTemp`。扫描端仍应按 `...2100` 服务 UUID 识别，不能依赖广播名称。
 
 ## 3. GATT 服务总览
 
