@@ -216,7 +216,8 @@
 
 #elif CONFIG_APP_RIDER_CORE_TEMP
 
-// Rider 是单一 BLE 外设；BLE 安全管理器使用无输入/无输出的自动 Just Works。
+// Rider 是单一 BLE 外设。CORE/HTS 的公开特征权限为 None；保留被动
+// Just Works 响应以兼容 DURA/COROS 的重连安全请求，但不主动发起配对。
 #define DOUBLE_BT_SAME_NAME                0
 #define DOUBLE_BT_SAME_MAC                 0
 #define CONFIG_APP_SPP_LE_TO_IDLE          0

@@ -101,7 +101,7 @@ u16 bt_get_tws_device_indicate(u8 *tws_device_indicate)
     return 0;
 }
 
-/** Provide the SDK's fixed pin-code fallback; security pairing is disabled. */
+/** Provide the legacy SDK PIN fallback; Rider BLE uses unattended Just Works. */
 const char *bt_get_pin_code(void)
 {
     return "0000";

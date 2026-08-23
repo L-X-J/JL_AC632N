@@ -4,6 +4,7 @@
 #include "core_temp_profile.h"
 #include "gatt_common/le_gatt_common.h"
 #include "le_common.h"
+#include "btstack/le/att.h"
 #include "asm/adc_api.h"
 
 #define LOG_TAG_CONST       GATT_SERVER
@@ -20,7 +21,7 @@
 #define RIDER_STANDARD_PERIOD_SECONDS   10
 #define RIDER_EXTERNAL_HR_TIMEOUT       15
 #define RIDER_CORE_FRAME_MAX            5
-#define RIDER_CORE_COMPAT_ADV_NAME      "CORE"
+#define RIDER_STANDARD_TEMPERATURE_FRAME_SIZE 5
 
 static u8 rider_adv_data[RIDER_ADV_PACKET_MAX];
 static u8 rider_scan_rsp_data[RIDER_ADV_PACKET_MAX];
@@ -34,6 +35,9 @@ static int16_t rider_last_adv_core;
 static u8 rider_pending_cp_response[3];
 static u8 rider_pending_cp_response_valid;
 static u8 rider_cp_indication_in_flight;
+static u8 rider_core_temperature_pending;
+static u8 rider_standard_temperature_pending;
+static u8 rider_battery_pending;
 static u8 rider_last_battery_level;
 static u8 rider_battery_level_valid;
 
@@ -49,6 +53,21 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
                                     uint8_t *buffer,
                                     uint16_t buffer_size);
 static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_param);
+
+/** Log the ATT operation shape and a bounded payload prefix for hardware tests. */
+static void rider_log_att_payload(const char *operation, u16 connection_handle,
+                                  u16 att_handle, u16 transaction_mode,
+                                  u16 offset, const u8 *buffer, u16 buffer_size)
+{
+    u16 dump_size = buffer_size > 8 ? 8 : buffer_size;
+
+    log_info("Rider ATT %s: conn=%04x handle=%04x mode=%d off=%d len=%d\n",
+             operation, connection_handle, att_handle, transaction_mode,
+             offset, buffer_size);
+    if (buffer && dump_size) {
+        put_buf((void *)buffer, dump_size);
+    }
+}
 
 #if RIDER_BATTERY_FULL_MV <= RIDER_BATTERY_EMPTY_MV
 #error "Rider battery full voltage must be above empty voltage"
@@ -126,22 +145,69 @@ static u16 rider_copy_ccc(u16 connection_handle, u16 ccc_handle, u16 offset,
     return rider_copy_value(value, sizeof(value), offset, buffer, buffer_size);
 }
 
+/** Store a CCCD value and expose the stack result for connection diagnostics. */
+static int rider_set_ccc(u16 connection_handle, u16 ccc_handle,
+                         u16 requested_ccc, u16 allowed_ccc)
+{
+    int result;
+    u16 stored_ccc;
+
+    requested_ccc &= allowed_ccc;
+    result = ble_gatt_server_characteristic_ccc_set(connection_handle,
+                                                    ccc_handle, requested_ccc);
+    stored_ccc = ble_gatt_server_characteristic_ccc_get(connection_handle,
+                                                        ccc_handle);
+    log_info("Rider CCCD: conn=%04x handle=%04x req=%04x stored=%04x ret=%d\n",
+             connection_handle, ccc_handle, requested_ccc, stored_ccc, result);
+    return result;
+}
+
 /** Send only after the matching CCCD mode and ATT queue are available. */
 static int rider_send_subscribed_value(u16 connection_handle, u16 value_handle,
                                        u16 ccc_handle, u16 required_ccc,
                                        u8 *value, u16 value_len)
 {
     u16 ccc;
+    u32 available_len;
+    int result;
 
     if (!connection_handle || !value || !value_len) {
         return GATT_CMD_PARAM_ERROR;
     }
     ccc = ble_gatt_server_characteristic_ccc_get(connection_handle, ccc_handle);
-    if (!(ccc & required_ccc) || !ble_comm_att_check_send(connection_handle, value_len)) {
+    if (!(ccc & required_ccc)) {
         return GATT_CMD_USE_CCC_FAIL;
     }
-    return ble_comm_att_send_data(connection_handle, value_handle, value, value_len,
-                                  ATT_OP_AUTO_READ_CCC);
+    available_len = ble_comm_cbuffer_vaild_len(connection_handle);
+    if (available_len < value_len) {
+        log_info("Rider TX blocked: conn=%04x value=%04x ccc=%04x mode=%04x "
+                 "need=%d available=%d\n",
+                 connection_handle, value_handle, ccc_handle, ccc,
+                 value_len, available_len);
+        return GATT_CMD_RET_BUSY;
+    }
+    result = ble_comm_att_send_data(connection_handle, value_handle, value, value_len,
+                                    ATT_OP_AUTO_READ_CCC);
+    if (result != GATT_OP_RET_SUCESS) {
+        log_info("Rider TX failed: conn=%04x value=%04x ccc=%04x mode=%04x "
+                 "len=%d ret=%d\n",
+                 connection_handle, value_handle, ccc_handle, ccc,
+                 value_len, result);
+    }
+    return result;
+}
+
+/** Ask the ATT server to wake the application when a send slot is available.
+ *
+ * The stack posts the CAN_SEND_NOW event asynchronously, after the current
+ * ATT transaction has returned, so a queued notification cannot overtake the
+ * CCCD write response.
+ */
+static void rider_request_can_send_now(u16 connection_handle)
+{
+    if (connection_handle) {
+        att_server_request_can_send_now_event(connection_handle);
+    }
 }
 
 /** Convert the AC632N VBAT monitor into the protocol's 0..100 percentage. */
@@ -183,6 +249,7 @@ static void rider_refresh_battery(void)
     if (result == GATT_OP_RET_SUCESS) {
         rider_last_battery_level = battery_level;
         rider_battery_level_valid = 1;
+        rider_battery_pending = 0;
     }
 }
 
@@ -192,7 +259,7 @@ static u16 rider_make_core_frame(u8 *frame, u16 frame_size,
 {
     int16_t core = 0x7fff;
     u8 flags = 0x04; /* Quality & State is present; core temperature is mandatory. */
-    u8 quality_state = 0x17; /* quality N/A + HR supported, no signal */
+    u8 quality_state = 0x07; /* quality N/A + HR pairing is not supported */
     u16 length = 0;
 
     if (!frame || frame_size < 4) {
@@ -219,16 +286,37 @@ static u16 rider_make_core_frame(u8 *frame, u16 frame_size,
     return length;
 }
 
+/** Send the custom CORE value once its notification CCCD and ATT queue allow it. */
+static int rider_send_core_temperature_now(void)
+{
+    u8 frame[RIDER_CORE_FRAME_MAX];
+    u16 frame_len;
+    rider_temperature_snapshot_t snapshot;
+
+    if (!rider_connection_handle) {
+        return GATT_CMD_PARAM_ERROR;
+    }
+    rider_estimator_copy_snapshot(&snapshot);
+    frame_len = rider_make_core_frame(frame, sizeof(frame), &snapshot);
+    return rider_send_subscribed_value(rider_connection_handle,
+                                       RIDER_ATT_CORE_TEMPERATURE_VALUE_HANDLE,
+                                       RIDER_ATT_CORE_TEMPERATURE_CCC_HANDLE,
+                                       GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION,
+                                       frame, frame_len);
+}
+
 /** Encode the SIG Health Thermometer IEEE-11073 FLOAT measurement. */
 static u16 rider_make_standard_temperature(u8 *value, u16 value_size,
                                             const rider_temperature_snapshot_t *snapshot)
 {
     int32_t mantissa;
 
-    if (!value || value_size < 6) {
+    /* CORE's published HTS implementation uses Flag + IEEE-11073 FLOAT.
+     * Temperature Type is exposed by the separate 0x2A1D characteristic. */
+    if (!value || value_size < RIDER_STANDARD_TEMPERATURE_FRAME_SIZE) {
         return 0;
     }
-    value[0] = 0x04; /* Celsius and Temperature Type present. */
+    value[0] = 0x04; /* Celsius; CORE keeps the type-present flag for 0x2A1D. */
     if (!snapshot || !snapshot->valid) {
         mantissa = 0x007fffff; /* IEEE-11073 FLOAT NaN mantissa. */
         value[1] = (u8)mantissa;
@@ -242,14 +330,75 @@ static u16 rider_make_standard_temperature(u8 *value, u16 value_size,
         value[3] = (u8)(mantissa >> 16);
         value[4] = 0xfe; /* 10^-2 Celsius. */
     }
-    value[5] = 0x02; /* General temperature type. */
-    return 6;
+    return RIDER_STANDARD_TEMPERATURE_FRAME_SIZE;
+}
+
+/** Send the standard HTS value once its CCCD and ATT queue allow it. */
+static int rider_send_standard_temperature_now(void)
+{
+    u8 value[RIDER_STANDARD_TEMPERATURE_FRAME_SIZE];
+    u16 value_len;
+    rider_temperature_snapshot_t snapshot;
+
+    if (!rider_connection_handle) {
+        return GATT_CMD_PARAM_ERROR;
+    }
+    rider_estimator_copy_snapshot(&snapshot);
+    value_len = rider_make_standard_temperature(value, sizeof(value), &snapshot);
+    return rider_send_subscribed_value(rider_connection_handle,
+                                       RIDER_ATT_STANDARD_TEMPERATURE_VALUE_HANDLE,
+                                       RIDER_ATT_STANDARD_TEMPERATURE_CCC_HANDLE,
+                                       GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION,
+                                       value, value_len);
+}
+
+/**
+ * Flush the first measurement requested by a newly enabled temperature CCCD.
+ *
+ * CCCD writes are handled inside an ATT request.  Deferring the actual value
+ * packet until the stack grants a send window keeps the ATT write response
+ * ahead of the notification, which is required by stricter cycling computers.
+ * The return mask lets the periodic fallback avoid sending a duplicate frame
+ * during the same scheduler tick.
+ */
+static u8 rider_try_send_pending_measurements(void)
+{
+    u8 sent = 0;
+
+    if (rider_core_temperature_pending) {
+        int result = rider_send_core_temperature_now();
+        log_info("Rider first CORE temperature: ret=%d ccc=%04x\n",
+                 result, ble_gatt_server_characteristic_ccc_get(
+                     rider_connection_handle, RIDER_ATT_CORE_TEMPERATURE_CCC_HANDLE));
+        if (result == GATT_OP_RET_SUCESS) {
+            rider_core_temperature_pending = 0;
+            sent |= BIT(0);
+        }
+    }
+    if (rider_standard_temperature_pending) {
+        int result = rider_send_standard_temperature_now();
+        log_info("Rider first HTS temperature: ret=%d ccc=%04x\n",
+                 result, ble_gatt_server_characteristic_ccc_get(
+                     rider_connection_handle, RIDER_ATT_STANDARD_TEMPERATURE_CCC_HANDLE));
+        if (result == GATT_OP_RET_SUCESS) {
+            rider_standard_temperature_pending = 0;
+            sent |= BIT(1);
+        }
+    }
+    if (rider_battery_pending) {
+        rider_refresh_battery();
+        if (!rider_battery_pending) {
+            sent |= BIT(2);
+        }
+    }
+    return sent;
 }
 
 /** Rebuild advertising and scan-response payloads from the current snapshot. */
 static void rider_make_advertisement(const rider_temperature_snapshot_t *snapshot)
 {
     u16 offset = 0;
+    u8 name_len = (u8)strlen(RIDER_CORE_TEMP_NAME);
 
     memset(rider_adv_data, 0, sizeof(rider_adv_data));
     memset(rider_scan_rsp_data, 0, sizeof(rider_scan_rsp_data));
@@ -259,20 +408,15 @@ static void rider_make_advertisement(const rider_temperature_snapshot_t *snapsho
     rider_adv_data[offset++] = 0x01;
     rider_adv_data[offset++] = 0x06;
 
-    /* Match the official CORE advertisement: HTS UUID is in the primary
-     * packet, while the custom CTS UUID is returned in the scan response. */
-    rider_adv_data[offset++] = 3;
-    rider_adv_data[offset++] = 0x03;
-    rider_adv_data[offset++] = 0x09;
-    rider_adv_data[offset++] = 0x18;
-
-    /* CORE-compatible collectors may use the advertised local name as a
-     * secondary filter after checking the service UUID. */
-    rider_adv_data[offset++] = sizeof(RIDER_CORE_COMPAT_ADV_NAME);
-    rider_adv_data[offset++] = 0x09;
-    memcpy(&rider_adv_data[offset], RIDER_CORE_COMPAT_ADV_NAME,
-           sizeof(RIDER_CORE_COMPAT_ADV_NAME) - 1);
-    offset += sizeof(RIDER_CORE_COMPAT_ADV_NAME) - 1;
+    /* Restore the original CORE-compatible layout.  Keep the complete
+     * 128-bit service UUID in the primary packet so a scanner can classify the
+     * sensor without depending on a scan response.  The product name remains
+     * in the scan response, as it was before the connection investigation. */
+    rider_adv_data[offset++] = 17;
+    rider_adv_data[offset++] = 0x07;
+    memcpy(&rider_adv_data[offset], rider_core_service_uuid128,
+           sizeof(rider_core_service_uuid128));
+    offset += sizeof(rider_core_service_uuid128);
 
     /* The documented beacon has no unavailable sentinel; omit it until valid. */
     if (snapshot && snapshot->valid) {
@@ -290,22 +434,23 @@ static void rider_make_advertisement(const rider_temperature_snapshot_t *snapsho
         }
     }
 
-    /* Active scanners can discover the complementary services and CTS. */
-    rider_scan_rsp_data[0] = 5;
+    /* Active scanners can display the product name and see the standard HTS
+     * service advertised by the original firmware. */
+    if (name_len > sizeof(rider_scan_rsp_data) - 6) {
+        name_len = sizeof(rider_scan_rsp_data) - 6;
+    }
+    rider_scan_rsp_data[0] = 3;
     rider_scan_rsp_data[1] = 0x03;
-    rider_scan_rsp_data[2] = 0x0a;
+    rider_scan_rsp_data[2] = 0x09;
     rider_scan_rsp_data[3] = 0x18;
-    rider_scan_rsp_data[4] = 0x0f;
-    rider_scan_rsp_data[5] = 0x18;
-    rider_scan_rsp_data[6] = 17;
-    rider_scan_rsp_data[7] = 0x07;
-    memcpy(&rider_scan_rsp_data[8], rider_core_service_uuid128,
-           sizeof(rider_core_service_uuid128));
+    rider_scan_rsp_data[4] = name_len + 1;
+    rider_scan_rsp_data[5] = 0x09;
+    memcpy(&rider_scan_rsp_data[6], RIDER_CORE_TEMP_NAME, name_len);
+    rider_adv_config.rsp_data_len = name_len + 6;
 
     rider_adv_config.adv_data = rider_adv_data;
     rider_adv_config.adv_data_len = offset;
     rider_adv_config.rsp_data = rider_scan_rsp_data;
-    rider_adv_config.rsp_data_len = 8 + sizeof(rider_core_service_uuid128);
     rider_adv_config.adv_interval = RIDER_ADV_INTERVAL;
     rider_adv_config.adv_auto_do = 1;
     rider_adv_config.adv_type = ADV_IND;
@@ -366,7 +511,6 @@ static int rider_queue_control_point_response(u8 opcode, u8 result)
     rider_pending_cp_response[1] = opcode;
     rider_pending_cp_response[2] = result;
     rider_pending_cp_response_valid = 1;
-    rider_try_send_pending_cp_response();
     return GATT_OP_RET_SUCESS;
 }
 
@@ -411,6 +555,11 @@ static uint16_t rider_att_read_callback(hci_con_handle_t connection_handle,
     u8 value[32];
     rider_temperature_snapshot_t snapshot;
     u16 value_len;
+
+    /* Read callbacks fill the caller's buffer; do not dump it before it is
+     * populated, but keep the handle trace for connection diagnostics. */
+    rider_log_att_payload("read", connection_handle, att_handle, 0, offset,
+                          NULL, buffer_size);
 
     switch (att_handle) {
     case RIDER_ATT_GAP_NAME_VALUE_HANDLE:
@@ -479,6 +628,9 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
 {
     u16 ccc_config;
 
+    rider_log_att_payload("write", connection_handle, att_handle,
+                          transaction_mode, offset, buffer, buffer_size);
+
     if (transaction_mode != ATT_TRANSACTION_MODE_NONE || offset != 0) {
         return GATT_CMD_PARAM_ERROR;
     }
@@ -490,10 +642,9 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
         }
         ccc_config = ((u16)buffer[0] | ((u16)buffer[1] << 8)) &
                      GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_INDICATION;
-        return ble_gatt_server_characteristic_ccc_set(connection_handle, att_handle,
-                                                       ccc_config);
+        return rider_set_ccc(connection_handle, att_handle, ccc_config,
+                             GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_INDICATION);
     case RIDER_ATT_CORE_TEMPERATURE_CCC_HANDLE:
-    case RIDER_ATT_STANDARD_TEMPERATURE_CCC_HANDLE:
     case RIDER_ATT_BATTERY_CCC_HANDLE:
         if (!buffer || buffer_size != 2) {
             return GATT_CMD_PARAM_ERROR;
@@ -501,11 +652,37 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
         ccc_config = ((u16)buffer[0] | ((u16)buffer[1] << 8)) &
                      GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION;
         {
-            int result = ble_gatt_server_characteristic_ccc_set(connection_handle,
-                                                                att_handle, ccc_config);
+            int result = rider_set_ccc(connection_handle, att_handle, ccc_config,
+                                        GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION);
             if (att_handle == RIDER_ATT_BATTERY_CCC_HANDLE && result == GATT_OP_RET_SUCESS) {
                 rider_battery_level_valid = 0;
-                rider_refresh_battery();
+                rider_battery_pending =
+                    (ccc_config & GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION) != 0;
+            }
+            if (att_handle == RIDER_ATT_CORE_TEMPERATURE_CCC_HANDLE &&
+                result == GATT_OP_RET_SUCESS) {
+                rider_core_temperature_pending =
+                    (ccc_config & GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION) != 0;
+            }
+            if (result == GATT_OP_RET_SUCESS && ccc_config) {
+                rider_request_can_send_now(connection_handle);
+            }
+            return result;
+        }
+    case RIDER_ATT_STANDARD_TEMPERATURE_CCC_HANDLE:
+        if (!buffer || buffer_size != 2) {
+            return GATT_CMD_PARAM_ERROR;
+        }
+        ccc_config = ((u16)buffer[0] | ((u16)buffer[1] << 8)) &
+                     GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION;
+        {
+            int result = rider_set_ccc(connection_handle, att_handle, ccc_config,
+                                        GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION);
+            if (result == GATT_OP_RET_SUCESS) {
+                rider_standard_temperature_pending = ccc_config != 0;
+                if (ccc_config) {
+                    rider_request_can_send_now(connection_handle);
+                }
             }
             return result;
         }
@@ -516,13 +693,22 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
         ccc_config = ((u16)buffer[0] | ((u16)buffer[1] << 8)) &
                      GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_INDICATION;
         {
-            int result = ble_gatt_server_characteristic_ccc_set(connection_handle,
-                                                                att_handle, ccc_config);
-            rider_try_send_pending_cp_response();
+            int result = rider_set_ccc(connection_handle, att_handle, ccc_config,
+                                        GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_INDICATION);
+            if (result == GATT_OP_RET_SUCESS && ccc_config &&
+                rider_pending_cp_response_valid) {
+                rider_request_can_send_now(connection_handle);
+            }
             return result;
         }
     case RIDER_ATT_CORE_CONTROL_POINT_VALUE_HANDLE:
-        return rider_handle_control_point(buffer, buffer_size);
+        {
+            int result = rider_handle_control_point(buffer, buffer_size);
+            if (result == GATT_OP_RET_SUCESS && rider_pending_cp_response_valid) {
+                rider_request_can_send_now(connection_handle);
+            }
+            return result;
+        }
     default:
         return GATT_CMD_PARAM_ERROR;
     }
@@ -537,13 +723,21 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
     case GATT_COMM_EVENT_CONNECTION_COMPLETE:
         if (packet && size >= 2) {
             rider_connection_handle = little_endian_read_16(packet, 0);
+            log_info("Rider connection: handle=%04x\n", rider_connection_handle);
             rider_tick_count = 0;
             rider_external_hr_age = 0;
             rider_pending_cp_response_valid = 0;
             rider_cp_indication_in_flight = 0;
+            rider_core_temperature_pending = 0;
+            rider_standard_temperature_pending = 0;
+            rider_battery_pending = 0;
             rider_battery_level_valid = 0;
             rider_estimator_set_external_heart_rate(0, 0);
         }
+        break;
+    case GATT_COMM_EVENT_CONNECTION_COMPLETE_FAIL:
+        log_info("Rider connection failed: status=%02x\n",
+                 ext_param ? ext_param[3] : 0);
         break;
     case GATT_COMM_EVENT_ENCRYPTION_REQUEST:
         /* The common server auto-confirms Just Works when this returns 0. */
@@ -567,33 +761,57 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
                 rider_external_hr_age = 0;
                 rider_pending_cp_response_valid = 0;
                 rider_cp_indication_in_flight = 0;
+                rider_core_temperature_pending = 0;
+                rider_standard_temperature_pending = 0;
+                rider_battery_pending = 0;
                 rider_battery_level_valid = 0;
                 rider_estimator_set_external_heart_rate(0, 0);
             }
         }
         break;
     case GATT_COMM_EVENT_SERVER_STATE:
-        if (packet && size >= 3 &&
-            (packet[0] == BLE_ST_IDLE || packet[0] == BLE_ST_DISCONN) &&
-            little_endian_read_16(packet, 1) == rider_connection_handle) {
-            rider_connection_handle = 0;
-            rider_external_hr_age = 0;
-            rider_pending_cp_response_valid = 0;
-            rider_cp_indication_in_flight = 0;
-            rider_battery_level_valid = 0;
-            rider_estimator_set_external_heart_rate(0, 0);
+        if (packet && size >= 3) {
+            handle = little_endian_read_16(packet, 1);
+            log_info("Rider server state: state=%02x handle=%04x\n",
+                     packet[0], handle);
+            if ((packet[0] == BLE_ST_IDLE || packet[0] == BLE_ST_DISCONN) &&
+                handle == rider_connection_handle) {
+                rider_connection_handle = 0;
+                rider_external_hr_age = 0;
+                rider_pending_cp_response_valid = 0;
+                rider_cp_indication_in_flight = 0;
+                rider_core_temperature_pending = 0;
+                rider_standard_temperature_pending = 0;
+                rider_battery_pending = 0;
+                rider_battery_level_valid = 0;
+                rider_estimator_set_external_heart_rate(0, 0);
+            }
+        }
+        break;
+    case GATT_COMM_EVENT_MTU_EXCHANGE_COMPLETE:
+        if (packet && size >= 4) {
+            log_info("Rider MTU: handle=%04x mtu=%d\n",
+                     little_endian_read_16(packet, 0),
+                     little_endian_read_16(packet, 2));
         }
         break;
     case GATT_COMM_EVENT_CAN_SEND_NOW:
+        rider_try_send_pending_measurements();
         rider_try_send_pending_cp_response();
         break;
     case GATT_COMM_EVENT_SERVER_INDICATION_COMPLETE:
         /* The common layer reports connection and value handles in packet[0:4].
          * Keep a queued response if an unrelated indication completes. */
-        if (packet && size >= 4 &&
-            little_endian_read_16(packet, 0) == rider_connection_handle &&
-            little_endian_read_16(packet, 2) == RIDER_ATT_CORE_CONTROL_POINT_VALUE_HANDLE) {
-            rider_cp_indication_in_flight = 0;
+        if (packet && size >= 4) {
+            handle = little_endian_read_16(packet, 0);
+            log_info("Rider indication complete: conn=%04x handle=%04x\n",
+                     handle, little_endian_read_16(packet, 2));
+            if (handle == rider_connection_handle &&
+                little_endian_read_16(packet, 2) ==
+                    RIDER_ATT_CORE_CONTROL_POINT_VALUE_HANDLE) {
+                rider_cp_indication_in_flight = 0;
+                rider_try_send_pending_cp_response();
+            }
         }
         break;
     default:
@@ -621,6 +839,9 @@ void rider_core_temp_gatt_init(void)
     rider_external_hr_age = 0;
     rider_pending_cp_response_valid = 0;
     rider_cp_indication_in_flight = 0;
+    rider_core_temperature_pending = 0;
+    rider_standard_temperature_pending = 0;
+    rider_battery_pending = 0;
     rider_battery_level_valid = 0;
     rider_last_adv_valid = 0;
     rider_last_adv_core = 0;
@@ -637,6 +858,9 @@ void rider_core_temp_gatt_exit(void)
 {
     rider_pending_cp_response_valid = 0;
     rider_cp_indication_in_flight = 0;
+    rider_core_temperature_pending = 0;
+    rider_standard_temperature_pending = 0;
+    rider_battery_pending = 0;
     rider_battery_level_valid = 0;
     rider_connection_handle = 0;
     if (rider_gatt_ready) {
@@ -655,9 +879,10 @@ void ble_module_enable(uint8_t enable)
 void rider_core_temp_ble_tick(void)
 {
     u8 core_frame[RIDER_CORE_FRAME_MAX];
-    u8 standard_value[6];
+    u8 standard_value[RIDER_STANDARD_TEMPERATURE_FRAME_SIZE];
     u16 core_frame_len;
     u16 standard_value_len;
+    u8 pending_sent;
     rider_temperature_snapshot_t snapshot;
 
     rider_tick_count++;
@@ -678,22 +903,29 @@ void rider_core_temp_ble_tick(void)
         return;
     }
 
+    pending_sent = rider_try_send_pending_measurements();
+    rider_try_send_pending_cp_response();
+
     core_frame_len = rider_make_core_frame(core_frame, sizeof(core_frame), &snapshot);
-    rider_send_subscribed_value(rider_connection_handle,
-                                RIDER_ATT_CORE_TEMPERATURE_VALUE_HANDLE,
-                                RIDER_ATT_CORE_TEMPERATURE_CCC_HANDLE,
-                                GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION,
-                                core_frame, core_frame_len);
+    if (!(pending_sent & BIT(0))) {
+        rider_send_subscribed_value(rider_connection_handle,
+                                    RIDER_ATT_CORE_TEMPERATURE_VALUE_HANDLE,
+                                    RIDER_ATT_CORE_TEMPERATURE_CCC_HANDLE,
+                                    GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION,
+                                    core_frame, core_frame_len);
+    }
 
     if ((rider_tick_count % RIDER_STANDARD_PERIOD_SECONDS) == 0) {
         standard_value_len = rider_make_standard_temperature(standard_value,
                                                               sizeof(standard_value),
                                                               &snapshot);
-        rider_send_subscribed_value(rider_connection_handle,
-                                    RIDER_ATT_STANDARD_TEMPERATURE_VALUE_HANDLE,
-                                    RIDER_ATT_STANDARD_TEMPERATURE_CCC_HANDLE,
-                                    GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION,
-                                    standard_value, standard_value_len);
+        if (!(pending_sent & BIT(1))) {
+            rider_send_subscribed_value(rider_connection_handle,
+                                        RIDER_ATT_STANDARD_TEMPERATURE_VALUE_HANDLE,
+                                        RIDER_ATT_STANDARD_TEMPERATURE_CCC_HANDLE,
+                                        GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION,
+                                        standard_value, standard_value_len);
+        }
     }
 }
 

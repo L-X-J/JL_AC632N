@@ -30,20 +30,22 @@ CORE 2 通过 BLE 提供三种获取核心体温的方式：
 00004200-F366-40B2-AC37-70CCE0AA83B1
 ```
 
-设备名通常为 `CORE`（可能随设备状态附带后缀），但不建议只通过设备名识别。
+官方 CORE 设备名通常为 `CORE`（可能随设备状态附带后缀），但不建议只通过设备名识别。本项目固件使用产品名 `ICXL-CoreTemp-Rider`，连接端仍应按服务 UUID 识别。
 
 ### 2.2 广播内容
 
-常见 Advertisement Data：
+官方 CORE 设备常见 Advertisement Data：
 
 | AD Type | 内容 |
 |---|---|
 | `0x01` | GAP Flags，示例 `0x06` |
 | `0x03` | 16-bit UUID 列表，包含 Health Thermometer Service `0x1809` |
-| `0x09` | Complete Local Name，通常为 `CORE` |
+| `0x09` | Complete Local Name，官方设备通常为 `CORE` |
 | `0xFF` | Manufacturer Specific Data，携带 beacon 核心温度 |
 
 自定义 CoreTemp Service 的 128-bit UUID 主要出现在主动扫描响应中；因此扫描端应采用 **active scan**。
+
+本项目的广播布局已经恢复为原有 Rider 版本：主广播包含 Flags、完整 Core 128-bit Service UUID，以及有效温度时的 Manufacturer Data；扫描响应包含 `0x1809` 和完整设备名 `ICXL-CoreTemp-Rider`。广播名称只用于界面显示，不能替代连接后的 GATT UUID 发现。
 
 ## 3. GATT 服务总览
 
@@ -174,15 +176,15 @@ bits 3、6–7 为保留位，应为 0。
 | 项目 | UUID | 说明 |
 |---|---|---|
 | Health Thermometer Service | `0x1809` | 标准服务 |
-| Temperature Measurement | `0x2A1C` | Notify；核心温度 |
+| Temperature Measurement | `0x2A1C` | Read, Notify；核心温度 |
 | Temperature Type | `0x2A1D` | CORE 值为 `0x02`（General） |
 
 ### 5.1 Temperature Measurement 数据
 
-`0x2A1C` 使用标准 IEEE 11073-20601 32-bit FLOAT：
+`0x2A1C` 使用标准 IEEE 11073-20601 32-bit FLOAT，兼容实现固定为 **5 字节**：
 
 ```text
-Flags (1 byte) + Temperature value (4 bytes) + [可选字段]
+Flags (1 byte) + Temperature value (4 bytes)
 ```
 
 CORE 的行为：
@@ -191,9 +193,15 @@ CORE 的行为：
 - Flags.bit1：`0`，不带时间戳；
 - Flags.bit2：`1`，携带 Temperature Type；
 - 无有效值时发送 IEEE 11073 NaN：`0x007FFFFF`；
-- 官方文档记录的典型通知间隔约为 **10 秒**，实际节奏可能受固件和测量状态影响。
+- CORE 官方实现和 Wear OS 示例使用 Notification CCCD；本 Rider 固件在此基础上保留 `Read`，兼容 DURA 在订阅前主动读取当前值的流程。`2A1D` 单独返回 `0x02`，HTS 当前发送节拍约为 **10 秒**。自定义 `0x2101` 温度特征按采样节拍约 1 Hz 发送。
+
+### 5.2 连接时序和认证
+
+连接后应先完成服务发现，再读取 Battery Level（如果需要），最后向 `2A1C` 的 `0x2902` 写入 `01 00`。每个 GATT 请求都必须先收到响应，再发送下一条请求或写 CCCD；这是 CORE 官方连接说明特别强调的时序要求。本 Rider 的公开特征权限为 None，不主动要求链路加密或绑定；Security Manager 仅被动响应 Central 发起的无输入/无输出 Just Works 请求，因此不需要 PIN 或人工确认。
 
 对于只需在码表显示当前核心温度的场景，此服务通常更容易接入；但它不带皮温、质量、HSI 等信息。
+
+广播布局保持 CORE 兼容形式，连接阶段是否成功取决于 GATT 服务发现、Battery 读取和 CCCD 写入时序，而不是设备名。
 
 ## 6. Battery Service
 
