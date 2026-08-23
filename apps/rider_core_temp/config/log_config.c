@@ -59,6 +59,24 @@ const char log_tag_const_d_APP AT(.LOG_TAG_CONST) = 1;
 const char log_tag_const_w_APP AT(.LOG_TAG_CONST) = 1;
 const char log_tag_const_e_APP AT(.LOG_TAG_CONST) = 1;
 
+const char log_tag_const_v_RIDER_TEMP AT(.LOG_TAG_CONST) = 0;
+const char log_tag_const_i_RIDER_TEMP AT(.LOG_TAG_CONST) = 1;
+const char log_tag_const_d_RIDER_TEMP AT(.LOG_TAG_CONST) = 0;
+const char log_tag_const_w_RIDER_TEMP AT(.LOG_TAG_CONST) = 1;
+const char log_tag_const_e_RIDER_TEMP AT(.LOG_TAG_CONST) = 1;
+
+const char log_tag_const_v_RIDER_ESTIMATOR AT(.LOG_TAG_CONST) = 0;
+const char log_tag_const_i_RIDER_ESTIMATOR AT(.LOG_TAG_CONST) = 1;
+const char log_tag_const_d_RIDER_ESTIMATOR AT(.LOG_TAG_CONST) = 0;
+const char log_tag_const_w_RIDER_ESTIMATOR AT(.LOG_TAG_CONST) = 1;
+const char log_tag_const_e_RIDER_ESTIMATOR AT(.LOG_TAG_CONST) = 1;
+
+const char log_tag_const_v_RIDER_BOARD_DIAG AT(.LOG_TAG_CONST) = 0;
+const char log_tag_const_i_RIDER_BOARD_DIAG AT(.LOG_TAG_CONST) = 1;
+const char log_tag_const_d_RIDER_BOARD_DIAG AT(.LOG_TAG_CONST) = 0;
+const char log_tag_const_w_RIDER_BOARD_DIAG AT(.LOG_TAG_CONST) = 1;
+const char log_tag_const_e_RIDER_BOARD_DIAG AT(.LOG_TAG_CONST) = 1;
+
 const char log_tag_const_v_AT_CMD AT(.LOG_TAG_CONST) = 0;
 const char log_tag_const_i_AT_CMD AT(.LOG_TAG_CONST) = 1;
 const char log_tag_const_d_AT_CMD AT(.LOG_TAG_CONST) = 1;
@@ -246,5 +264,3 @@ const char log_tag_const_i_FTMS AT(.LOG_TAG_CONST) = 1;
 const char log_tag_const_d_FTMS AT(.LOG_TAG_CONST) = 1;
 const char log_tag_const_w_FTMS AT(.LOG_TAG_CONST) = 1;
 const char log_tag_const_e_FTMS AT(.LOG_TAG_CONST) = 1;
-
-

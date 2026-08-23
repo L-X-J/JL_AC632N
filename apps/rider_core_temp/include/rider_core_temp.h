@@ -23,6 +23,7 @@ typedef struct {
 } rider_temperature_sample_t;
 
 typedef struct {
+    uint32_t sequence;
     int16_t core_temperature_centi;
     uint8_t valid;
     uint8_t quality;
@@ -30,6 +31,13 @@ typedef struct {
     uint8_t heart_rate;
     uint8_t heart_rate_valid;
 } rider_temperature_snapshot_t;
+
+/** BLE state used by the board diagnostic indicator, independent of GATT data. */
+enum rider_ble_state {
+    RIDER_BLE_STATE_OFF = 0,
+    RIDER_BLE_STATE_ADVERTISING = 1,
+    RIDER_BLE_STATE_CONNECTED = 2,
+};
 
 void rider_temp_init(void);
 void rider_temp_stop(void);
@@ -49,6 +57,7 @@ void rider_core_temp_gatt_before_init(void);
 void rider_core_temp_gatt_init(void);
 void rider_core_temp_gatt_exit(void);
 void rider_core_temp_ble_tick(void);
+enum rider_ble_state rider_core_temp_ble_state(void);
 
 void bt_ble_before_start_init(void);
 void bt_ble_init(void);

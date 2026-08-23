@@ -370,8 +370,7 @@
 #undef TCFG_POWER_ON_NEED_KEY
 #define TCFG_POWER_ON_NEED_KEY		        0
 
-#undef TCFG_UART0_ENABLE
-#define TCFG_UART0_ENABLE					DISABLE_THIS_MOUDLE
+/* Keep the board-selected UART0 debug output enabled for sensor bring-up. */
 
 #endif
 

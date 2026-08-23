@@ -7,6 +7,7 @@
 #include "btstack/avctp_user.h"
 #include "btstack/le/ble_api.h"
 #include "gatt_common/le_gatt_common.h"
+#include "rider_board_diag.h"
 
 #if CONFIG_APP_RIDER_CORE_TEMP
 
@@ -88,11 +89,13 @@ void bt_ble_init(void)
     /* The scheduler owns sensor/estimator initialization so a restart clears
      * stale samples exactly once before the first conversion is queued. */
     rider_core_temp_start_scheduler();
+    rider_board_diag_init();
 }
 
 /** Stop sampling before disabling and releasing the GATT common module. */
 void bt_ble_exit(void)
 {
+    rider_board_diag_stop();
     rider_core_temp_stop_scheduler();
     ble_module_enable(0);
     rider_core_temp_gatt_exit();

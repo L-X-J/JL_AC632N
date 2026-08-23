@@ -45,7 +45,7 @@ CORE 2 通过 BLE 提供三种获取核心体温的方式：
 
 自定义 CoreTemp Service 的 128-bit UUID 主要出现在主动扫描响应中；因此扫描端应采用 **active scan**。
 
-本项目的广播布局已经恢复为原有 Rider 版本：主广播包含 Flags、完整 Core 128-bit Service UUID，以及有效温度时的 Manufacturer Data；扫描响应包含 `0x1809` 和完整设备名 `ICXL-CoreTemp-Rider`。广播名称只用于界面显示，不能替代连接后的 GATT UUID 发现。
+本项目按 CORE 官方连接说明采用相同的广播分工：主广播包含 Flags、`0x1809`、兼容名称 `CORE`，以及有效温度时的 Manufacturer Data；主动扫描响应包含 `0x180A`、`0x180F` 和完整 Core 128-bit Service UUID。完整产品名 `ICXL-CoreTemp-Rider` 通过 GAP/GATT 设备名提供。扫描端应启用 active scan，并按 `...2100` 服务 UUID 识别，不能依赖广播名称。
 
 ## 3. GATT 服务总览
 
@@ -171,7 +171,7 @@ bits 3、6–7 为保留位，应为 0。
 
 ## 5. 标准 Health Thermometer Service
 
-如果码表只实现 BLE SIG 标准 Health Thermometer Profile，可使用此服务。
+如果码表只实现 BLE SIG 标准 Health Thermometer Profile，可使用此服务。平均核心温度不是 CORE BLE 广播或 `0x2101` 的字段，而是码表基于历史样本自行统计的汇总值；没有独立皮温传感器时，皮温字段应按 Flags 置 0 并显示为不可用，不应填 0°C。
 
 | 项目 | UUID | 说明 |
 |---|---|---|

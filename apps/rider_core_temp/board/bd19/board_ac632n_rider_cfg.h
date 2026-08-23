@@ -26,6 +26,23 @@
 #define TCFG_UART0_TX_PORT  				IO_PORTA_00                            //串口发送脚配置
 #define TCFG_UART0_BAUDRATE  				1000000                                //串口波特率配置
 
+//*********************************************************************************//
+//                              开发板诊断配置                                     //
+//*********************************************************************************//
+/*
+ * AC632_DevKitBoard V2.0 的 LED1/2/3 与 IOKey1/2 位于 J12 接口，必须用跳线
+ * 分别连接到下面的 MCU GPIO。默认映射只使用 PB0/PB1/PB4/PB5/PB6，PB7 保留
+ * 给 M601，PA0 保留给 UART0 TX。若你的底板跳线不同，只修改这些板级宏。
+ */
+#define RIDER_BOARD_DIAG_ENABLE              1
+#define RIDER_BOARD_DIAG_LED1_PORT          IO_PORTB_06   // J12 LED1, 红色
+#define RIDER_BOARD_DIAG_LED2_PORT          IO_PORTB_05   // J12 LED2, 绿色
+#define RIDER_BOARD_DIAG_LED3_PORT          IO_PORTB_04   // J12 LED3, 蓝色
+#define RIDER_BOARD_DIAG_IOKEY1_PORT        IO_PORTB_00   // J12 IOKey1, 按下为低
+#define RIDER_BOARD_DIAG_IOKEY2_PORT        IO_PORTB_01   // J12 IOKey2, 按下为低
+#define RIDER_BOARD_DIAG_LED_ACTIVE_LEVEL   1
+#define RIDER_BOARD_DIAG_KEY_ACTIVE_LEVEL   0
+
 #define UART_DB_TX_PIN                      IO_PORTA_01                            //AT_CHART串口
 #define UART_DB_RX_PIN                      IO_PORTA_02
 #define UART_DB_RTS_PIN                     IO_PORTA_06

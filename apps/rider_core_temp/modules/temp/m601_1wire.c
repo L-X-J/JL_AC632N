@@ -2,6 +2,11 @@
 #include "app_config.h"
 #include "rider_core_temp.h"
 
+#define LOG_TAG_CONST       RIDER_TEMP
+#define LOG_TAG             "[RIDER_TEMP]"
+#define LOG_INFO_ENABLE
+#include "debug.h"
+
 #if CONFIG_APP_RIDER_CORE_TEMP
 
 /* M601 follows the 1-Wire command sequence shown in doc/temp_sample. */
@@ -48,6 +53,22 @@ static void rider_delay_us(u32 usec)
 static rider_temperature_sample_t rider_latest_sample;
 static u16 rider_conversion_timeout;
 static u8 rider_conversion_pending;
+static u8 rider_m601_crc8(const u8 *data, u8 length);
+
+/** Print the raw M601 frame and the validation result for hardware bring-up. */
+static void rider_m601_log_sample(const u8 *scratchpad, int status,
+                                  int16_t temperature_centi)
+{
+    u16 raw_bits = (u16)scratchpad[0] | ((u16)scratchpad[1] << 8);
+    u8 crc_expected = rider_m601_crc8(scratchpad, 8);
+
+    log_info("M601 read: seq=%u status=%d valid=%u raw=0x%04x temp_centi=%d "
+             "crc=%02x/%02x\n",
+             (unsigned)rider_latest_sample.sequence, status,
+             (unsigned)(status == RIDER_TEMP_STATUS_OK), raw_bits,
+             (int)temperature_centi, crc_expected, scratchpad[8]);
+    put_buf(scratchpad, RIDER_M601_SCRATCHPAD_SIZE);
+}
 
 /** Put PB7 in the released open-drain state used by the sensor bus. */
 static void rider_1wire_release(void)
@@ -193,13 +214,16 @@ static void rider_m601_record_failure(u8 status)
     rider_latest_sample.sequence++;
     rider_latest_sample.valid = 0;
     rider_latest_sample.status = status;
+    rider_latest_sample.temperature_centi = 0x7fff;
+    log_info("M601 sample failure: seq=%u status=%u valid=0 temp_centi=32767\n",
+             (unsigned)rider_latest_sample.sequence, (unsigned)status);
 }
 
 /** Read and validate the scratchpad after the conversion delay expires. */
 static void rider_m601_complete_conversion(void *priv)
 {
     u8 scratchpad[RIDER_M601_SCRATCHPAD_SIZE];
-    int16_t temperature_centi;
+    int16_t temperature_centi = 0x7fff;
     u8 index;
     int status;
 
@@ -227,7 +251,10 @@ static void rider_m601_complete_conversion(void *priv)
     rider_latest_sample.valid = (status == RIDER_TEMP_STATUS_OK);
     if (rider_latest_sample.valid) {
         rider_latest_sample.temperature_centi = temperature_centi;
+    } else {
+        rider_latest_sample.temperature_centi = 0x7fff;
     }
+    rider_m601_log_sample(scratchpad, status, temperature_centi);
     rider_1wire_release();
 }
 
@@ -238,6 +265,8 @@ void rider_temp_init(void)
     rider_latest_sample.status = RIDER_TEMP_STATUS_NO_DEVICE;
     rider_conversion_timeout = 0;
     rider_conversion_pending = 0;
+    log_info("M601 init: port=PB7 convert_delay_ms=%u crc_check=%u\n",
+             RIDER_M601_CONVERT_DELAY_MS, RIDER_M601_VALIDATE_CRC);
     rider_1wire_release();
 }
 
@@ -263,6 +292,8 @@ void rider_temp_start_conversion(void)
         return;
     }
 
+    log_info("M601 convert start: next_seq=%u\n",
+             (unsigned)(rider_latest_sample.sequence + 1));
     rider_1wire_write_byte(0xcc); /* SKIP ROM */
     rider_1wire_write_byte(0x44); /* CONVERT T */
     rider_conversion_pending = 1;

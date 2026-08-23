@@ -22,6 +22,7 @@
 #define RIDER_EXTERNAL_HR_TIMEOUT       15
 #define RIDER_CORE_FRAME_MAX            5
 #define RIDER_STANDARD_TEMPERATURE_FRAME_SIZE 5
+#define RIDER_CORE_COMPAT_ADV_NAME      "CORE"
 
 static u8 rider_adv_data[RIDER_ADV_PACKET_MAX];
 static u8 rider_scan_rsp_data[RIDER_ADV_PACKET_MAX];
@@ -53,6 +54,28 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
                                     uint8_t *buffer,
                                     uint16_t buffer_size);
 static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_param);
+
+/** Print protocol-facing temperature state without treating unavailable fields as zero. */
+static void rider_log_temperature_snapshot(const char *stage,
+                                           const rider_temperature_snapshot_t *snapshot)
+{
+    if (!snapshot || !snapshot->valid) {
+        log_info("Rider temperature %s: seq=%u valid=0 status=%u core=NA(32767) "
+                 "skin=NA average=NA quality=%u\n",
+                 stage ? stage : "unknown",
+                 snapshot ? (unsigned)snapshot->sequence : 0,
+                 snapshot ? (unsigned)snapshot->sensor_status : 0,
+                 snapshot ? (unsigned)snapshot->quality : 7);
+        return;
+    }
+
+    log_info("Rider temperature %s: seq=%u valid=1 status=%u core_centi=%d "
+             "skin=NA average=NA quality=%u\n",
+             stage, (unsigned)snapshot->sequence,
+             (unsigned)snapshot->sensor_status,
+             (int)snapshot->core_temperature_centi,
+             (unsigned)snapshot->quality);
+}
 
 /** Log the ATT operation shape and a bounded payload prefix for hardware tests. */
 static void rider_log_att_payload(const char *operation, u16 connection_handle,
@@ -298,6 +321,10 @@ static int rider_send_core_temperature_now(void)
     }
     rider_estimator_copy_snapshot(&snapshot);
     frame_len = rider_make_core_frame(frame, sizeof(frame), &snapshot);
+    rider_log_temperature_snapshot("CORE notify", &snapshot);
+    log_info("Rider CORE notify payload: len=%u handle=%04x\n", frame_len,
+             RIDER_ATT_CORE_TEMPERATURE_VALUE_HANDLE);
+    put_buf(frame, frame_len);
     return rider_send_subscribed_value(rider_connection_handle,
                                        RIDER_ATT_CORE_TEMPERATURE_VALUE_HANDLE,
                                        RIDER_ATT_CORE_TEMPERATURE_CCC_HANDLE,
@@ -345,6 +372,10 @@ static int rider_send_standard_temperature_now(void)
     }
     rider_estimator_copy_snapshot(&snapshot);
     value_len = rider_make_standard_temperature(value, sizeof(value), &snapshot);
+    rider_log_temperature_snapshot("HTS notify", &snapshot);
+    log_info("Rider HTS notify payload: len=%u handle=%04x\n", value_len,
+             RIDER_ATT_STANDARD_TEMPERATURE_VALUE_HANDLE);
+    put_buf(value, value_len);
     return rider_send_subscribed_value(rider_connection_handle,
                                        RIDER_ATT_STANDARD_TEMPERATURE_VALUE_HANDLE,
                                        RIDER_ATT_STANDARD_TEMPERATURE_CCC_HANDLE,
@@ -398,7 +429,6 @@ static u8 rider_try_send_pending_measurements(void)
 static void rider_make_advertisement(const rider_temperature_snapshot_t *snapshot)
 {
     u16 offset = 0;
-    u8 name_len = (u8)strlen(RIDER_CORE_TEMP_NAME);
 
     memset(rider_adv_data, 0, sizeof(rider_adv_data));
     memset(rider_scan_rsp_data, 0, sizeof(rider_scan_rsp_data));
@@ -408,15 +438,17 @@ static void rider_make_advertisement(const rider_temperature_snapshot_t *snapsho
     rider_adv_data[offset++] = 0x01;
     rider_adv_data[offset++] = 0x06;
 
-    /* Restore the original CORE-compatible layout.  Keep the complete
-     * 128-bit service UUID in the primary packet so a scanner can classify the
-     * sensor without depending on a scan response.  The product name remains
-     * in the scan response, as it was before the connection investigation. */
-    rider_adv_data[offset++] = 17;
-    rider_adv_data[offset++] = 0x07;
-    memcpy(&rider_adv_data[offset], rider_core_service_uuid128,
-           sizeof(rider_core_service_uuid128));
-    offset += sizeof(rider_core_service_uuid128);
+    /* Match the official CORE beacon layout: HTS UUID and the short CORE name
+     * stay in the primary packet; the custom service UUID is in scan response. */
+    rider_adv_data[offset++] = 3;
+    rider_adv_data[offset++] = 0x03;
+    rider_adv_data[offset++] = 0x09;
+    rider_adv_data[offset++] = 0x18;
+    rider_adv_data[offset++] = sizeof(RIDER_CORE_COMPAT_ADV_NAME);
+    rider_adv_data[offset++] = 0x09;
+    memcpy(&rider_adv_data[offset], RIDER_CORE_COMPAT_ADV_NAME,
+           sizeof(RIDER_CORE_COMPAT_ADV_NAME) - 1);
+    offset += sizeof(RIDER_CORE_COMPAT_ADV_NAME) - 1;
 
     /* The documented beacon has no unavailable sentinel; omit it until valid. */
     if (snapshot && snapshot->valid) {
@@ -434,19 +466,19 @@ static void rider_make_advertisement(const rider_temperature_snapshot_t *snapsho
         }
     }
 
-    /* Active scanners can display the product name and see the standard HTS
-     * service advertised by the original firmware. */
-    if (name_len > sizeof(rider_scan_rsp_data) - 6) {
-        name_len = sizeof(rider_scan_rsp_data) - 6;
-    }
-    rider_scan_rsp_data[0] = 3;
+    /* Active scanners receive the complementary services and the custom CORE
+     * service UUID, exactly as described by the official implementation notes. */
+    rider_scan_rsp_data[0] = 5;
     rider_scan_rsp_data[1] = 0x03;
-    rider_scan_rsp_data[2] = 0x09;
+    rider_scan_rsp_data[2] = 0x0a;
     rider_scan_rsp_data[3] = 0x18;
-    rider_scan_rsp_data[4] = name_len + 1;
-    rider_scan_rsp_data[5] = 0x09;
-    memcpy(&rider_scan_rsp_data[6], RIDER_CORE_TEMP_NAME, name_len);
-    rider_adv_config.rsp_data_len = name_len + 6;
+    rider_scan_rsp_data[4] = 0x0f;
+    rider_scan_rsp_data[5] = 0x18;
+    rider_scan_rsp_data[6] = 17;
+    rider_scan_rsp_data[7] = 0x07;
+    memcpy(&rider_scan_rsp_data[8], rider_core_service_uuid128,
+           sizeof(rider_core_service_uuid128));
+    rider_adv_config.rsp_data_len = 8 + sizeof(rider_core_service_uuid128);
 
     rider_adv_config.adv_data = rider_adv_data;
     rider_adv_config.adv_data_len = offset;
@@ -472,6 +504,11 @@ static void rider_refresh_advertisement(const rider_temperature_snapshot_t *snap
 
     rider_make_advertisement(snapshot);
     if (changed && rider_gatt_ready && !rider_connection_handle) {
+        log_info("Rider advertisement refresh: valid=%u core_centi=%d adv_len=%u rsp_len=%u\n",
+                 (unsigned)valid, (int)core, rider_adv_config.adv_data_len,
+                 rider_adv_config.rsp_data_len);
+        put_buf(rider_adv_config.adv_data, rider_adv_config.adv_data_len);
+        put_buf(rider_adv_config.rsp_data, rider_adv_config.rsp_data_len);
         if (ble_gatt_server_adv_enable(0) == GATT_OP_RET_SUCESS) {
             ble_gatt_server_adv_enable(1);
         }
@@ -584,10 +621,16 @@ static uint16_t rider_att_read_callback(hci_con_handle_t connection_handle,
     case RIDER_ATT_CORE_TEMPERATURE_VALUE_HANDLE:
         rider_estimator_copy_snapshot(&snapshot);
         value_len = rider_make_core_frame(value, sizeof(value), &snapshot);
+        rider_log_temperature_snapshot("ATT CORE read", &snapshot);
+        log_info("Rider ATT CORE read payload: len=%u\n", value_len);
+        put_buf(value, value_len);
         return rider_copy_value(value, value_len, offset, buffer, buffer_size);
     case RIDER_ATT_STANDARD_TEMPERATURE_VALUE_HANDLE:
         rider_estimator_copy_snapshot(&snapshot);
         value_len = rider_make_standard_temperature(value, sizeof(value), &snapshot);
+        rider_log_temperature_snapshot("ATT HTS read", &snapshot);
+        log_info("Rider ATT HTS read payload: len=%u\n", value_len);
+        put_buf(value, value_len);
         return rider_copy_value(value, value_len, offset, buffer, buffer_size);
     case RIDER_ATT_TEMPERATURE_TYPE_VALUE_HANDLE:
         value[0] = 0x02;
@@ -869,6 +912,21 @@ void rider_core_temp_gatt_exit(void)
     }
 }
 
+/** Expose only the coarse BLE lifecycle needed by board diagnostics. */
+enum rider_ble_state rider_core_temp_ble_state(void)
+{
+    if (!rider_gatt_ready) {
+        return RIDER_BLE_STATE_OFF;
+    }
+    if (rider_connection_handle) {
+        return RIDER_BLE_STATE_CONNECTED;
+    }
+    if (ble_gatt_server_get_work_state() == BLE_ST_ADV) {
+        return RIDER_BLE_STATE_ADVERTISING;
+    }
+    return RIDER_BLE_STATE_OFF;
+}
+
 /** Product-facing BLE module switch used by update/common hooks. */
 void ble_module_enable(uint8_t enable)
 {
@@ -897,6 +955,7 @@ void rider_core_temp_ble_tick(void)
         }
     }
 
+    rider_log_temperature_snapshot("BLE tick", &snapshot);
     rider_refresh_advertisement(&snapshot);
     rider_refresh_battery();
     if (!rider_connection_handle) {
@@ -907,6 +966,9 @@ void rider_core_temp_ble_tick(void)
     rider_try_send_pending_cp_response();
 
     core_frame_len = rider_make_core_frame(core_frame, sizeof(core_frame), &snapshot);
+    log_info("Rider CORE frame: len=%u handle=%04x\n", core_frame_len,
+             RIDER_ATT_CORE_TEMPERATURE_VALUE_HANDLE);
+    put_buf(core_frame, core_frame_len);
     if (!(pending_sent & BIT(0))) {
         rider_send_subscribed_value(rider_connection_handle,
                                     RIDER_ATT_CORE_TEMPERATURE_VALUE_HANDLE,
@@ -919,6 +981,9 @@ void rider_core_temp_ble_tick(void)
         standard_value_len = rider_make_standard_temperature(standard_value,
                                                               sizeof(standard_value),
                                                               &snapshot);
+        log_info("Rider HTS frame: len=%u handle=%04x\n", standard_value_len,
+                 RIDER_ATT_STANDARD_TEMPERATURE_VALUE_HANDLE);
+        put_buf(standard_value, standard_value_len);
         if (!(pending_sent & BIT(1))) {
             rider_send_subscribed_value(rider_connection_handle,
                                         RIDER_ATT_STANDARD_TEMPERATURE_VALUE_HANDLE,

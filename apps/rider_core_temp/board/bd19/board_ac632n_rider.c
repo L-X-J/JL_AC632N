@@ -75,6 +75,13 @@ static void rider_close_gpio(void)
 
     /* PB7 is deliberately excluded from the high-impedance mask. */
     rider_protect_port(groups, IO_PORTB_07);
+#if RIDER_BOARD_DIAG_ENABLE
+    rider_protect_port(groups, RIDER_BOARD_DIAG_LED1_PORT);
+    rider_protect_port(groups, RIDER_BOARD_DIAG_LED2_PORT);
+    rider_protect_port(groups, RIDER_BOARD_DIAG_LED3_PORT);
+    rider_protect_port(groups, RIDER_BOARD_DIAG_IOKEY1_PORT);
+    rider_protect_port(groups, RIDER_BOARD_DIAG_IOKEY2_PORT);
+#endif
 #if TCFG_UART0_ENABLE
     rider_protect_port(groups, TCFG_UART0_TX_PORT);
     rider_protect_port(groups, TCFG_UART0_RX_PORT);
