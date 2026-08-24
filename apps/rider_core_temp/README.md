@@ -4,7 +4,7 @@
 
 `apps/rider_core_temp` 是 AC632N（bd19）上的独立 BLE 外设应用。它只负责 Rider CoreTemp 产品的应用编排、CORE 兼容 GATT 协议、M601 温度传感器适配和产品级板卡配置；不复用 `apps/spp_and_le` 的产品源文件，也不把产品协议放入 `apps/common` 或 `cpu/bd19`。
 
-设备名固定为 `ICXL-RTemp`，只启用 BLE 外设角色：经典蓝牙、SPP、BLE Client、USB、音频、充电和演示按键逻辑均关闭。为兼容 DURA/COROS 的扫描后连接流程，主广播包含 Flags、Core 128-bit Service UUID 和有效时的 Manufacturer Data；主动扫描响应包含 `0x1809` 与完整设备名。连接阶段必须按 GATT UUID 发现服务，不依赖广播名称或服务序号。CORE 的公开 GATT 特征安全权限为 None；Security Manager 只被动响应 Central 发起的无输入/无输出 Just Works，不主动发起配对、不要求 PIN 或人工确认。
+设备名固定为 `ICXL-RTemp`，只启用 BLE 外设角色：经典蓝牙、SPP、BLE Client、USB、音频、充电和演示按键逻辑均关闭。为兼容标准体温码表和 DURA/COROS，主广播同时包含 Flags、Core 128-bit Service UUID 和 Health Thermometer `0x1809`；主动扫描响应包含 `0x1809`、完整设备名和有效时的 Manufacturer Data。码表作为 BLE Central 会在扫描后自动连接、发现其支持的 GATT UUID，并按标准流程读取/打开 CCCD；固件不要求用户手工操作。CORE-aware 码表可从 `0x2101` 一次取得 Skin 与 Core，标准-only 码表可从 `0x1809/0x2A1C` 取得 Core。连接阶段必须按 GATT UUID 发现服务，不依赖广播名称或服务序号。CORE 的公开 GATT 特征安全权限为 None；Security Manager 只被动响应 Central 发起的无输入/无输出 Just Works，不主动发起配对、不要求 PIN 或人工确认。
 
 ## 目录结构
 

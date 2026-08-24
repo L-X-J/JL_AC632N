@@ -551,45 +551,60 @@ static void rider_make_advertisement(const rider_temperature_snapshot_t *snapsho
     rider_adv_data[offset++] = 0x01;
     rider_adv_data[offset++] = 0x06;
 
-    /* Keep the custom service UUID in the primary packet.  DURA/COROS first
-     * sees the primary report and may start connecting before an active-scan
-     * response arrives; hiding this UUID in the response caused the previous
-     * scan-visible-but-not-connectable regression. */
+    /* Put both service identities in the primary packet. A standard-only
+     * meter may filter advertisements without requesting a scan response,
+     * while CORE-aware meters need the custom UUID to connect immediately. */
     rider_adv_data[offset++] = 17;
     rider_adv_data[offset++] = 0x07;
     memcpy(&rider_adv_data[offset], rider_core_service_uuid128,
            sizeof(rider_core_service_uuid128));
     offset += sizeof(rider_core_service_uuid128);
 
-    /* The documented beacon has no unavailable sentinel; omit it until valid. */
-    if (snapshot && rider_core_frame_value_available(snapshot)) {
-        int32_t milli = (int32_t)rider_core_frame_value(snapshot) * 10;
-        if (milli >= 0 && milli <= 0xffff) {
-            u16 temperature_milli = (u16)milli;
-            rider_adv_data[offset++] = 7;
-            rider_adv_data[offset++] = 0xff;
-            rider_adv_data[offset++] = 0x0b; /* Manufacturer ID 0xF60B LE. */
-            rider_adv_data[offset++] = 0xf6;
-            rider_adv_data[offset++] = 0x00; /* Beacon data version. */
-            rider_adv_data[offset++] = 0x04; /* Normal measurement state. */
-            rider_adv_data[offset++] = (u8)temperature_milli;
-            rider_adv_data[offset++] = (u8)(temperature_milli >> 8);
-        }
-    }
+    /* Standard Health Thermometer UUID (0x1809), so a meter can identify the
+     * device without depending on the active-scan response. */
+    rider_adv_data[offset++] = 3;
+    rider_adv_data[offset++] = 0x03;
+    rider_adv_data[offset++] = 0x09;
+    rider_adv_data[offset++] = 0x18;
 
-    /* The response carries the standard thermometer UUID and product name.
-     * Clamp the name so future identity changes cannot overflow 31 bytes. */
-    if (name_len > sizeof(rider_scan_rsp_data) - 6) {
-        name_len = sizeof(rider_scan_rsp_data) - 6;
+    /* The response carries the name and the complete Core-compatible beacon.
+     * Keeping the manufacturer payload here preserves its version/state bytes
+     * without exceeding the 31-byte primary advertisement limit. */
+    {
+        u16 response_offset = 0;
+        int32_t milli = (int32_t)rider_core_frame_value(snapshot) * 10;
+
+        rider_scan_rsp_data[response_offset++] = 3;
+        rider_scan_rsp_data[response_offset++] = 0x03;
+        rider_scan_rsp_data[response_offset++] = 0x09;
+        rider_scan_rsp_data[response_offset++] = 0x18;
+        if (name_len > sizeof(rider_scan_rsp_data) - response_offset - 2) {
+            name_len = sizeof(rider_scan_rsp_data) - response_offset - 2;
+        }
+        rider_scan_rsp_data[response_offset++] = name_len + 1;
+        rider_scan_rsp_data[response_offset++] = 0x09;
+        memcpy(&rider_scan_rsp_data[response_offset], RIDER_CORE_TEMP_NAME,
+               name_len);
+        response_offset += name_len;
+
+        /* The documented beacon has no unavailable sentinel; omit it until
+         * the Core candidate is valid. */
+        if (snapshot && rider_core_frame_value_available(snapshot) &&
+            milli >= 0 && milli <= 0xffff &&
+            response_offset + 9 <= sizeof(rider_scan_rsp_data)) {
+            u16 temperature_milli = (u16)milli;
+
+            rider_scan_rsp_data[response_offset++] = 7;
+            rider_scan_rsp_data[response_offset++] = 0xff;
+            rider_scan_rsp_data[response_offset++] = 0x0b; /* 0xF60B LE. */
+            rider_scan_rsp_data[response_offset++] = 0xf6;
+            rider_scan_rsp_data[response_offset++] = 0x00; /* Beacon version. */
+            rider_scan_rsp_data[response_offset++] = 0x04; /* Normal state. */
+            rider_scan_rsp_data[response_offset++] = (u8)temperature_milli;
+            rider_scan_rsp_data[response_offset++] = (u8)(temperature_milli >> 8);
+        }
+        rider_adv_config.rsp_data_len = response_offset;
     }
-    rider_scan_rsp_data[0] = 3;
-    rider_scan_rsp_data[1] = 0x03;
-    rider_scan_rsp_data[2] = 0x09;
-    rider_scan_rsp_data[3] = 0x18;
-    rider_scan_rsp_data[4] = name_len + 1;
-    rider_scan_rsp_data[5] = 0x09;
-    memcpy(&rider_scan_rsp_data[6], RIDER_CORE_TEMP_NAME, name_len);
-    rider_adv_config.rsp_data_len = name_len + 6;
 
     rider_adv_config.adv_data = rider_adv_data;
     rider_adv_config.adv_data_len = offset;

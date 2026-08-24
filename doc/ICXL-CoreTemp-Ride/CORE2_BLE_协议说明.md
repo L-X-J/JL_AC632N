@@ -10,7 +10,7 @@ CORE 2 通过 BLE 提供三种获取核心体温的方式：
 2. **标准 Health Thermometer Service**：仅需兼容标准体温计协议或仅显示核心温度的码表可使用。
 3. **广播 Manufacturer Specific Data**：无需连接，适合低功耗快速显示；仅能取得广播中的核心温度和设备状态。
 
-若码表需要最完整、最稳定的数据，应连接设备并订阅自定义温度特征 `00002101-5B1E-4347-B07C-97B514DAE121`。
+码表不需要用户手工配置：支持该 profile 的 BLE Central 通常会在连接后自动发现服务并打开相应 CCCD。支持 CORE 的码表应自动订阅 `00002101-5B1E-4347-B07C-97B514DAE121`，一次取得 Skin 与 Core；只支持标准 Health Thermometer 的码表则自动订阅 `0x1809/0x2A1C`，取得 Core。外围设备不能强制一个不认识自定义 UUID 的 Central 解析 Skin 字段，因此固件同时暴露标准 HTS 作为兼容通道。
 
 ## 2. BLE 扫描与设备识别
 
@@ -45,7 +45,7 @@ CORE 2 通过 BLE 提供三种获取核心体温的方式：
 
 官方设备的自定义 CoreTemp Service 128-bit UUID 可能只出现在主动扫描响应中，因此通用扫描端仍建议采用 **active scan**；本项目固件则将该 UUID 放在主广播包中以兼容扫描后立即连接的 Central。
 
-本项目为兼容 DURA/COROS 的扫描后连接流程，主广播包含 Flags、完整 Core 128-bit Service UUID，以及有效温度时的 Manufacturer Data；主动扫描响应包含 `0x1809` 和完整产品名 `ICXL-RTemp`。扫描端仍应按 `...2100` 服务 UUID 识别，不能依赖广播名称。
+本项目为兼容标准体温码表和 DURA/COROS 的扫描后连接流程，主广播同时包含 Flags、完整 Core 128-bit Service UUID 和 `0x1809`；主动扫描响应包含 `0x1809`、完整产品名 `ICXL-RTemp`，以及有效 Core 候选的 Manufacturer Data。扫描端可以按自己支持的 UUID 自动识别，不能依赖广播名称。
 
 ## 3. GATT 服务总览
 
