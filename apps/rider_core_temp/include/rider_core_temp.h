@@ -76,13 +76,14 @@ enum rider_temperature_freshness {
 #define RIDER_TEMP_FILTER_EWMA_ALPHA_Q8      64
 #define RIDER_TEMP_FILTER_SLOPE_LIMIT_CPM    150
 
-/* Core estimation remains a shadow feature until a calibration file is
- * installed and passes the held-out-session error gate. A product board may
- * explicitly select CONTACT_PROXY for bring-up compatibility; that mode
- * publishes stable contact temperature but does not validate it as core. */
+/* Publication is intentionally separate from model validity. EXPERIMENTAL
+ * publishes the unverified candidate so real rides can be recorded; STRICT
+ * additionally requires the offline held-out-session gate. CONTACT_PROXY is
+ * retained only for old firmware comparisons and publishes contact twice. */
 #define RIDER_CORE_TEMP_PUBLISH_SHADOW       0
 #define RIDER_CORE_TEMP_PUBLISH_STRICT       1
 #define RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY 2
+#define RIDER_CORE_TEMP_PUBLISH_EXPERIMENTAL 3
 #ifndef RIDER_CORE_TEMP_PUBLISH_MODE
 #define RIDER_CORE_TEMP_PUBLISH_MODE         RIDER_CORE_TEMP_PUBLISH_SHADOW
 #endif

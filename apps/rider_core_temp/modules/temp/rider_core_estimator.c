@@ -72,6 +72,13 @@ static void rider_estimator_load_default_calibration(void)
     rider_calibration.lag_alpha_q8 = RIDER_CORE_TEMP_CAL_LAG_ALPHA_Q8;
     rider_calibration.available = RIDER_CORE_TEMP_CALIBRATION_AVAILABLE ? 1 : 0;
     rider_calibration.valid = RIDER_CORE_TEMP_CALIBRATION_VALID ? 1 : 0;
+#if RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_EXPERIMENTAL
+    /* Collection mode must expose a deterministic candidate before a
+     * physiological offset is available. It uses the filtered multi-sample
+     * skin signal with the same lag/limit model; calibration can replace it
+     * later without changing the BLE contract. */
+    rider_calibration.available = 1;
+#endif
 }
 
 /** Clear all measurement channels while preserving the current sequence/HR. */
@@ -120,7 +127,9 @@ static void rider_estimator_update_core_model(
 
     if (!rider_calibration.available || !filtered || !filtered->valid ||
         filtered->state != RIDER_TEMP_STATE_STABLE ||
-        filtered->quality < RIDER_TEMP_QUALITY_GOOD) {
+        filtered->quality < RIDER_TEMP_QUALITY_FAIR ||
+        (RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_STRICT &&
+         filtered->quality < RIDER_TEMP_QUALITY_GOOD)) {
         rider_snapshot.core_estimate_valid = 0;
         rider_snapshot.core_estimate_verified = 0;
         rider_snapshot.core_temperature_centi = 0x7fff;
@@ -151,7 +160,11 @@ static void rider_estimator_update_core_model(
                                     ? (uint8_t)(rider_snapshot.confidence + 10)
                                     : 100;
     rider_snapshot.core_estimate_valid =
+#if RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_EXPERIMENTAL
+        1;
+#else
         rider_snapshot.confidence >= RIDER_CORE_TEMP_MIN_CONFIDENCE;
+#endif
     rider_snapshot.core_estimate_verified = rider_snapshot.core_estimate_valid &&
                                             rider_calibration.valid;
     if (!rider_snapshot.core_estimate_valid) {
@@ -187,10 +200,9 @@ void rider_estimator_init(void)
  * Consume one validated M601 sample and publish filtered single-site skin
  * temperature. The core estimate is a separate model over these samples.
  *
- * The numerical core model is deliberately shadow-only until an offline
- * calibration is installed. The skin value is available during WARMING;
- * CONTACT_PROXY still exposes a separate stable contact value for bring-up,
- * without treating a guessed offset as a core estimate.
+ * EXPERIMENTAL mode exposes the numerical candidate after stability so the
+ * product can compare it with real-world references. The candidate remains
+ * explicitly unverified and is never treated as a medical measurement.
  */
 void rider_estimator_consume(const rider_temperature_sample_t *sample)
 {
@@ -232,6 +244,12 @@ void rider_estimator_consume(const rider_temperature_sample_t *sample)
 #if RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_STRICT
     rider_snapshot.valid = rider_snapshot.core_estimate_valid &&
                            rider_snapshot.core_estimate_verified;
+#elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_EXPERIMENTAL
+    rider_snapshot.valid = rider_snapshot.core_estimate_valid &&
+                           rider_snapshot.temperature_state ==
+                               RIDER_TEMP_STATE_STABLE &&
+                           rider_snapshot.data_freshness ==
+                               RIDER_TEMP_FRESHNESS_FRESH;
 #elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
     rider_snapshot.valid = rider_snapshot.contact_valid &&
                            rider_snapshot.temperature_state ==
@@ -317,6 +335,12 @@ void rider_estimator_set_core_calibration(
     rider_snapshot.core_temperature_centi = 0x7fff;
 #if RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
     rider_snapshot.valid = rider_snapshot.contact_valid &&
+                           rider_snapshot.temperature_state ==
+                               RIDER_TEMP_STATE_STABLE &&
+                           rider_snapshot.data_freshness ==
+                               RIDER_TEMP_FRESHNESS_FRESH;
+#elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_EXPERIMENTAL
+    rider_snapshot.valid = rider_snapshot.core_estimate_valid &&
                            rider_snapshot.temperature_state ==
                                RIDER_TEMP_STATE_STABLE &&
                            rider_snapshot.data_freshness ==

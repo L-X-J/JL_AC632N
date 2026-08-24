@@ -67,6 +67,10 @@ static u8 rider_core_frame_value_available(
     }
 #if RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_STRICT
     return snapshot->core_estimate_valid && snapshot->core_estimate_verified;
+#elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_EXPERIMENTAL
+    return snapshot->core_estimate_valid &&
+           snapshot->temperature_state == RIDER_TEMP_STATE_STABLE &&
+           snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH;
 #elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
     return rider_contact_proxy_core_available(snapshot);
 #else
@@ -83,6 +87,11 @@ static int16_t rider_core_frame_value(
     }
 #if RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_STRICT
     return snapshot->core_estimate_valid && snapshot->core_estimate_verified
+               ? snapshot->core_temperature_centi : 0x7fff;
+#elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_EXPERIMENTAL
+    return snapshot->core_estimate_valid &&
+           snapshot->temperature_state == RIDER_TEMP_STATE_STABLE &&
+           snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH
                ? snapshot->core_temperature_centi : 0x7fff;
 #elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
     return rider_contact_proxy_core_available(snapshot)

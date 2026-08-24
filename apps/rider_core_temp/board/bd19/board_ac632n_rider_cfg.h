@@ -46,14 +46,13 @@
 /*
  * The board bring-up firmware must provide a value to existing meters before
  * an offline core-temperature calibration has passed its held-out-session
- * gate. CONTACT_PROXY publishes the filtered, stable chest contact value in
- * the CORE/HTS temperature field for compatibility; it is explicitly not a
- * validated physiological core-temperature estimate. Keep the generic header
- * default in SHADOW mode and allow a build flag to override this product
- * choice when collecting calibration data or enabling STRICT mode.
+ * gate. EXPERIMENTAL publishes both the filtered Skin field and the
+ * deterministic, unverified multi-sample Core candidate so real rides can be
+ * recorded. Keep STRICT for a later validated calibration; CONTACT_PROXY is
+ * retained only for comparing the older contact-only behavior.
  */
 #ifndef RIDER_CORE_TEMP_PUBLISH_MODE
-#define RIDER_CORE_TEMP_PUBLISH_MODE         RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
+#define RIDER_CORE_TEMP_PUBLISH_MODE         RIDER_CORE_TEMP_PUBLISH_EXPERIMENTAL
 #endif
 
 #define UART_DB_TX_PIN                      IO_PORTA_01                            //AT_CHART串口

@@ -123,7 +123,7 @@ Offset  长度  字段
 | Heart Rate | `UINT8` | BPM；值 `0` 表示当前没有心率信号 |
 | Heat Strain Index | `UINT8` | 数值 ÷ 10，范围约 `0.0`–`25.4` |
 
-核心温度为 `0x7FFF`（十进制 `32767`）时，表示 **Data not available**，不得将其换算为正常温度。M601 固定贴肤点的有效样本在 `WARMING` 或 `STABLE` 阶段可作为 Skin Temperature 字段；连续 5 个原始样本落在 `35~38°C`，或累计 30 个 `30~45°C` 佩戴窗口内有效样本，即可完成稳定资格，预热阶段核心字段仍保持 `0x7FFF`。当前 AC632N bring-up 板级为兼容旧码表显式选择 `CONTACT_PROXY`，因此达到稳定接触后核心字段会带滤波后的 M601 皮肤/接触温度；该字段不是经过参考数据验证的核心体温。完成留出时段验证后才可启用 `STRICT`。
+核心温度为 `0x7FFF`（十进制 `32767`）时，表示 **Data not available**，不得将其换算为正常温度。M601 固定贴肤点的有效样本在 `WARMING` 或 `STABLE` 阶段可作为 Skin Temperature 字段；连续 5 个原始样本落在 `35~38°C`，或累计 30 个 `30~45°C` 佩戴窗口内有效样本，即可完成稳定资格，预热阶段核心字段仍保持 `0x7FFF`。当前 AC632N 板级选择 `EXPERIMENTAL`，达到稳定接触后 CORE 帧同时带滤波后的 M601 Skin 和多样本模型 Core 候选；该候选尚未通过参考数据验证。完成留出时段验证后才可启用 `STRICT`；`CONTACT_PROXY` 仅用于旧版本行为对比。
 
 #### Quality & State 字段
 
@@ -171,7 +171,7 @@ bits 3、6–7 为保留位，应为 0。
 
 ## 5. 标准 Health Thermometer Service
 
-如果码表只实现 BLE SIG 标准 Health Thermometer Profile，可使用此服务。平均温度不是 CORE BLE 广播或 `0x2101` 的字段，而是码表基于历史样本自行统计的汇总值；Rider 的单 M601 在通过佩戴窗口的 `WARMING`/`STABLE` 阶段可作为固定贴肤点皮肤温度填入自定义 CORE 的 Skin Temperature 字段，但标准 HTS 不承载皮温。通用 `SHADOW`/严格未验证状态下，HTS 核心值保持 NaN；当前板级 `CONTACT_PROXY` 为兼容旧码表，仅在稳定接触后发送滤波后的 M601 皮肤/接触温度代理，码表侧应将其标注为皮肤/接触温度趋势，不应宣称为已验证核心体温。
+如果码表只实现 BLE SIG 标准 Health Thermometer Profile，可使用此服务。平均温度不是 CORE BLE 广播或 `0x2101` 的字段，而是码表基于历史样本自行统计的汇总值；Rider 的单 M601 在通过佩戴窗口的 `WARMING`/`STABLE` 阶段可作为固定贴肤点皮肤温度填入自定义 CORE 的 Skin Temperature 字段，但标准 HTS 不承载皮温。通用 `SHADOW`/严格未验证状态下，HTS 核心值保持 NaN；当前板级 `EXPERIMENTAL` 在稳定接触后发送模型 Core 候选，码表侧应将其标注为实验算法输出，不应宣称为已验证核心体温。
 
 | 项目 | UUID | 说明 |
 |---|---|---|
@@ -193,7 +193,7 @@ CORE 的行为：
 - Flags.bit1：`0`，不带时间戳；
 - Flags.bit2：`1`，携带 Temperature Type；
 - 无有效值时发送 IEEE 11073 NaN：`0x007FFFFF`；
-- CORE 官方实现和 Wear OS 示例使用 Notification CCCD；本 Rider 固件在此基础上保留 `Read`，兼容 DURA 在订阅前主动读取当前值的流程。Rider 在 `STRICT` 模式下仅发送已验证核心估算；`SHADOW` 返回 IEEE 11073 NaN；当前板级 `CONTACT_PROXY` 在稳定接触后发送滤波后的 M601 皮肤/接触温度代理。`2A1D` 单独返回 `0x02`，HTS 当前发送节拍约为 **10 秒**。自定义 `0x2101` 温度特征按采样节拍约 1 Hz 发送，`WARMING` 也可附带 M601 皮肤温度，但不会因此提前发布 HTS/核心字段。
+- CORE 官方实现和 Wear OS 示例使用 Notification CCCD；本 Rider 固件在此基础上保留 `Read`，兼容 DURA 在订阅前主动读取当前值的流程。Rider 在 `STRICT` 模式下仅发送已验证核心估算；`SHADOW` 返回 IEEE 11073 NaN；当前板级 `EXPERIMENTAL` 在稳定接触后发送模型 Core 候选。`2A1D` 单独返回 `0x02`，HTS 当前发送节拍约为 **10 秒**。自定义 `0x2101` 温度特征按采样节拍约 1 Hz 发送，`WARMING` 带 Skin 但 Core 无效，`STABLE` 同时带 Skin 和 Core 候选。
 
 ### 5.2 连接时序和认证
 
@@ -213,7 +213,7 @@ CORE 的行为：
 
 ## 7. 广播 Beacon 温度格式
 
-无需连接时，可从 AD Type `0xFF` 的 Manufacturer Specific Data 读取核心温度或板级 CONTACT_PROXY 温度代理。
+无需连接时，可从 AD Type `0xFF` 的 Manufacturer Specific Data 读取 Core 候选；广播不承载 Skin 字段。
 
 ```text
 Offset  长度  字段
