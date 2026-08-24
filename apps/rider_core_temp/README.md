@@ -41,7 +41,7 @@ J12（跳线接到 MCU GPIO）
 
 ## AC632N 开发板初步诊断
 
-开发板资料为 `doc/datasheet/AC632N/AC632N开发板/AC632_DevKitBoard V2.0原理图.pdf`。原理图中的 J12 是 LED/按键接口，不是已经连接到 AC632N 的固定 GPIO；烧录前必须按下表插跳线。下面以 MCU 排针 J1 为例，J3 上具有相同名称的 GPIO 也可以使用。
+开发板资料为 `doc/datasheet/AC632N/AC632N开发板/AC632_DevKitBoard V2.0原理图.pdf`；完整板卡和 J12 位置见 [AC632_DevKitBoard V2.0 板卡说明](../../doc/datasheet/AC632N/AC632N开发板/AC632_DevKitBoard_V2.0_板卡说明.md)。原理图中的 J12 是 LED/按键接口，不是已经连接到 AC632N 的固定 GPIO；烧录前必须按下表插跳线。下面以 MCU 排针 J1 为例，J3 上具有相同名称的 GPIO 也可以使用。
 
 | J12 脚位 | 信号 | 默认 MCU 映射 | J1 示例脚位 |
 |---:|---|---|---:|
@@ -53,6 +53,8 @@ J12（跳线接到 MCU GPIO）
 | 6 | LED3（蓝） | PB4 | 12 |
 
 按键为低电平有效，固件开启内部上拉；LED 由 GPIO 高电平点亮。默认映射刻意避开 PB7（M601 1-Wire）和 PA0（UART0 TX），不要把 J12 任一信号接到 PB7，也不要占用 PA0。若跳线改接其他 GPIO，只修改 `board/bd19/board_ac632n_rider_cfg.h` 中的 `RIDER_BOARD_DIAG_*_PORT` 宏，并重新烧录。
+
+如果实物没有装配 J12 但能找到 LED2 信号焊盘，可直接使用当前固件的既有映射：`PB6 -> LED2` 会让物理绿灯显示逻辑 LED1 的 BLE 状态，`PB5 -> LED2` 会让它显示逻辑 LED2 的 M601 状态。LED2 的 `510R` 限流电阻必须保留；不要把 PB7 或 PA0 接到 LED。具体替代接法和单灯配置见 [AC632_DevKitBoard V2.0 板卡说明](../../doc/datasheet/AC632N/AC632N开发板/AC632_DevKitBoard_V2.0_板卡说明.md)。
 
 LED 行为如下：
 

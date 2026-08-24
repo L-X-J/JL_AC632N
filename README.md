@@ -132,6 +132,8 @@ AGENT.md            架构约束真相源
 
 * 开发评估板 ：开发板申请入口[链接](https://shop321455197.taobao.com/?spm=a230r.7195193.1997079397.2.2a6d391d3n5udo)
 
+* AC632N 开发板资料：[AC632_DevKitBoard V2.0 板卡说明](./doc/datasheet/AC632N/AC632N开发板/AC632_DevKitBoard_V2.0_板卡说明.md)，包含 J12 位置、LED/按键引脚和当前 Rider 固件跳线映射。
+
 * 生产烧写工具 : 为量产和裸片烧写而设计, 申请入口 [链接](https://item.taobao.com/item.htm?spm=a1z10.1-c-s.w4004-22883854875.8.504d246bXKwyeH&id=620941819219) 并仔细阅读相关 [文档](https://doc.zh-jieli.com/Tools/zh-cn/mass_prod_tools/burner_1tuo2/index.html)
 
 * 无线测试盒 : 为空中升级/射频标定/快速产品测试而设计, 申请入口 [链接](https://item.taobao.com/item.htm?spm=a1z10.1-c-s.w4004-22883854875.10.504d246bXKwyeH&id=620942507511), 阅读[文档](https://doc.zh-jieli.com/Tools/zh-cn/mass_prod_tools/testbox_1tuo2/index.html) 获取更多详细信息.
