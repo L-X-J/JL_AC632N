@@ -159,9 +159,15 @@ static void rider_diag_render_status(const rider_temperature_snapshot_t *snapsho
         rider_diag_led_set(RIDER_BOARD_DIAG_LED1_PORT, 1);
     }
 
-    /* Green LED2 is the sensor state; a valid sample is steady, no device is fast. */
+    /* Green LED2 is the sensor state: warming blinks slowly, stable contact
+     * is steady, and a missing device blinks quickly. */
     if (snapshot && snapshot->contact_valid) {
-        rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, 1);
+        if (snapshot->temperature_state == RIDER_TEMP_STATE_WARMING) {
+            rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT,
+                               (rider_diag_tick_count % 10) < 5);
+        } else {
+            rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, 1);
+        }
     } else if (sensor_fault && snapshot->sensor_status == RIDER_TEMP_STATUS_NO_DEVICE) {
         rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT,
                            (rider_diag_tick_count % 4) < 2);
