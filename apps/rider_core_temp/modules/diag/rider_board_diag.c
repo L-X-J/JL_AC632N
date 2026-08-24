@@ -32,6 +32,8 @@ static u8 rider_diag_button_flash_ticks;
 static u8 rider_diag_last_ble_state = 0xff;
 static u8 rider_diag_last_temp_valid = 0xff;
 static u8 rider_diag_last_temp_status = 0xff;
+static u8 rider_diag_last_temp_state = 0xff;
+static u8 rider_diag_last_temp_freshness = 0xff;
 
 /** Return whether a board mapping names a real AC632N GPIO. */
 static u8 rider_diag_port_valid(u32 port)
@@ -103,15 +105,19 @@ static void rider_diag_log_state(const rider_temperature_snapshot_t *snapshot,
     }
     if (rider_diag_last_ble_state == (u8)ble_state &&
         rider_diag_last_temp_valid == snapshot->contact_valid &&
-        rider_diag_last_temp_status == snapshot->sensor_status) {
+        rider_diag_last_temp_status == snapshot->sensor_status &&
+        rider_diag_last_temp_state == snapshot->temperature_state &&
+        rider_diag_last_temp_freshness == snapshot->data_freshness) {
         return;
     }
     rider_diag_last_ble_state = (u8)ble_state;
     rider_diag_last_temp_valid = snapshot->contact_valid;
     rider_diag_last_temp_status = snapshot->sensor_status;
+    rider_diag_last_temp_state = snapshot->temperature_state;
+    rider_diag_last_temp_freshness = snapshot->data_freshness;
     log_info("state: ble=%u contact_valid=%u core_valid=%u core_verified=%u "
              "status=%u state=%u freshness=%u seq=%u contact_centi=%d "
-             "skin_centi=%d core_centi=%d\n",
+             "skin_centi=%d core_centi=%d warmup=%u/%u\n",
              (unsigned)ble_state, (unsigned)snapshot->contact_valid,
              (unsigned)snapshot->core_estimate_valid,
              (unsigned)snapshot->core_estimate_verified,
@@ -121,7 +127,9 @@ static void rider_diag_log_state(const rider_temperature_snapshot_t *snapshot,
              (int)snapshot->sequence,
              snapshot->contact_valid ? (int)snapshot->contact_temperature_centi : 32767,
              snapshot->skin_valid ? (int)snapshot->skin_temperature_centi : 32767,
-             snapshot->core_estimate_valid ? (int)snapshot->core_temperature_centi : 32767);
+             snapshot->core_estimate_valid ? (int)snapshot->core_temperature_centi : 32767,
+             (unsigned)snapshot->warmup_valid_samples,
+             (unsigned)snapshot->warmup_normal_samples);
 }
 
 /** Render the one-button LED self-test sequence. */
@@ -159,15 +167,20 @@ static void rider_diag_render_status(const rider_temperature_snapshot_t *snapsho
         rider_diag_led_set(RIDER_BOARD_DIAG_LED1_PORT, 1);
     }
 
-    /* Green LED2 is the sensor state: warming blinks slowly, stable contact
-     * is steady, and a missing device blinks quickly. */
-    if (snapshot && snapshot->contact_valid) {
-        if (snapshot->temperature_state == RIDER_TEMP_STATE_WARMING) {
-            rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT,
-                               (rider_diag_tick_count % 10) < 5);
-        } else {
-            rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, 1);
-        }
+    /* Green LED2 is deliberately driven by the complete signal contract:
+     * only a fresh, valid STABLE episode is steady. This prevents an old
+     * contact sample or an invalid state from looking like a locked reading. */
+    if (snapshot && snapshot->contact_valid &&
+        snapshot->sensor_status == RIDER_TEMP_STATUS_OK &&
+        snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH &&
+        snapshot->temperature_state == RIDER_TEMP_STATE_STABLE) {
+        rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, 1);
+    } else if (snapshot && snapshot->contact_valid &&
+               snapshot->sensor_status == RIDER_TEMP_STATUS_OK &&
+               snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH &&
+               snapshot->temperature_state == RIDER_TEMP_STATE_WARMING) {
+        rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT,
+                           (rider_diag_tick_count % 10) < 5);
     } else if (sensor_fault && snapshot->sensor_status == RIDER_TEMP_STATUS_NO_DEVICE) {
         rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT,
                            (rider_diag_tick_count % 4) < 2);
@@ -200,7 +213,7 @@ static void rider_diag_dump_state(void)
     log_info("button dump: ble=%u contact_valid=%u skin_valid=%u core_valid=%u "
              "core_verified=%u status=%u state=%u freshness=%u seq=%u "
              "contact_centi=%d "
-             "skin_centi=%d core_centi=%d confidence=%u\n",
+             "skin_centi=%d core_centi=%d confidence=%u warmup=%u/%u\n",
              (unsigned)ble_state, (unsigned)snapshot.contact_valid,
              (unsigned)snapshot.skin_valid,
              (unsigned)snapshot.core_estimate_valid,
@@ -212,7 +225,9 @@ static void rider_diag_dump_state(void)
              snapshot.contact_valid ? (int)snapshot.contact_temperature_centi : 32767,
              snapshot.skin_valid ? (int)snapshot.skin_temperature_centi : 32767,
              snapshot.core_estimate_valid ? (int)snapshot.core_temperature_centi : 32767,
-             (unsigned)snapshot.confidence);
+             (unsigned)snapshot.confidence,
+             (unsigned)snapshot.warmup_valid_samples,
+             (unsigned)snapshot.warmup_normal_samples);
 }
 
 /** Handle a debounced button press without changing product protocol state. */
@@ -301,6 +316,8 @@ void rider_board_diag_init(void)
     rider_diag_last_ble_state = 0xff;
     rider_diag_last_temp_valid = 0xff;
     rider_diag_last_temp_status = 0xff;
+    rider_diag_last_temp_state = 0xff;
+    rider_diag_last_temp_freshness = 0xff;
 
     rider_diag_led_init(RIDER_BOARD_DIAG_LED1_PORT);
     rider_diag_led_init(RIDER_BOARD_DIAG_LED2_PORT);

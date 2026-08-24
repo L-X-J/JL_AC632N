@@ -99,6 +99,12 @@ static int16_t rider_filter_ewma(int16_t previous, int16_t input)
     } else {
         step = -(((-step) + 128) / 256);
     }
+    /* Preserve direction for a one-centi-degree change. Without a minimum
+     * signed step, the 0.25 EWMA coefficient would round small cooling (or
+     * warming) changes to zero forever, hiding them from the core model. */
+    if (!step && delta) {
+        step = delta > 0 ? 1 : -1;
+    }
     return (int16_t)(previous + step);
 }
 
@@ -221,6 +227,8 @@ void rider_temp_filter_consume(const rider_temperature_sample_t *sample,
     output->sequence = sample->sequence;
     output->filtered_temperature_centi = rider_filter.filtered_temperature_centi;
     output->slope_centi_per_min = slope;
+    output->valid_samples = rider_filter.valid_samples;
+    output->normal_samples = rider_filter.normal_samples;
     output->valid = 1;
     output->status = RIDER_TEMP_STATUS_OK;
     output->state = rider_filter.stable_latched ? RIDER_TEMP_STATE_STABLE

@@ -51,6 +51,23 @@ static void test_median_rejects_an_in_window_spike(void)
     assert(output.filtered_temperature_centi == 3600);
 }
 
+/** Verify that a small monotonic cooling trend is not rounded away. */
+static void test_small_cooling_trend_is_preserved(void)
+{
+    rider_temperature_filter_output_t output;
+    uint32_t sequence;
+
+    rider_temp_filter_init();
+    for (sequence = 1; sequence <= 5; ++sequence) {
+        output = feed(sequence, 3600, 1, RIDER_TEMP_STATUS_OK);
+    }
+    for (sequence = 6; sequence <= 10; ++sequence) {
+        output = feed(sequence, 3599, 1, RIDER_TEMP_STATUS_OK);
+    }
+    assert(output.valid);
+    assert(output.filtered_temperature_centi < 3600);
+}
+
 /** Verify five consecutive normal skin readings qualify the episode early. */
 static void test_warming_and_stable_boundaries(void)
 {
@@ -155,6 +172,7 @@ int main(void)
 {
     test_not_worn_sample_is_dropped();
     test_median_rejects_an_in_window_spike();
+    test_small_cooling_trend_is_preserved();
     test_warming_and_stable_boundaries();
     test_broad_wear_window_fallback();
     test_normal_band_count_resets_without_losing_validity();

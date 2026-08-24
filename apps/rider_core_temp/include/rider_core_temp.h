@@ -121,6 +121,8 @@ typedef struct {
     uint32_t sequence;
     int16_t filtered_temperature_centi;
     int16_t slope_centi_per_min;
+    uint16_t valid_samples; /* Valid samples in the current wear episode. */
+    uint8_t normal_samples; /* Samples in the accelerated 35~38 C band. */
     uint8_t valid;
     uint8_t quality;
     uint8_t status;
@@ -152,6 +154,8 @@ typedef struct {
     uint8_t sensor_status;
     uint8_t temperature_state;
     uint8_t data_freshness;
+    uint16_t warmup_valid_samples; /* Diagnostic-only qualification progress. */
+    uint8_t warmup_normal_samples; /* Diagnostic-only normal-band count. */
     uint8_t heart_rate;
     uint8_t heart_rate_valid;
 } rider_temperature_snapshot_t;
