@@ -82,9 +82,9 @@ profile 使用 `include/core_temp_profile.h` 中的静态 ATT 数据，所有多
 | Device Information / Model Number | `0x180A` / `0x2A24` | Read | `0x0021` | - |
 | Device Information / Firmware Revision | `0x180A` / `0x2A26` | Read | `0x0023` | - |
 
-CORE 温度通知的核心温度字段是有符号百分之一摄氏度；当前实现支持可选皮肤附近温度、Quality & State 和外部心率字段。通过 `30~45°C` 佩戴窗口和 M601 校验的有效样本，在 `WARMING` 阶段即可附带 Skin Temperature 代理，Quality 会标记为 Poor；核心字段仍保持 `0x7FFF`，直到达到 `STABLE`。通用头文件默认 `RIDER_CORE_TEMP_PUBLISH_MODE=SHADOW`，但当前 AC632N 板级 bring-up 显式选择 `CONTACT_PROXY`：稳定接触后把滤波后的接触温度映射到 CORE/HTS 核心字段，解决旧码表完全收不到温度的问题；该值是接触温度代理，不是经过参考数据验证的核心体温。若存在标定候选参数，核心影子估算仍只记录；只有完成留出时段验证并启用 `STRICT` 模式后才发布核心估算。Quality 低 4 位反映滤波后的温度信号质量；没有外部心率时，仅心率关联状态表示“支持但未收到信号”。Control Point 只实现协议文档中约定的外部心率输入 `0x13`，其他操作返回“不支持”。核心无效温度编码为 `0x7FFF`。
+CORE 温度通知的核心温度字段是有符号百分之一摄氏度；当前实现支持 M601 固定贴肤点的皮肤温度、Quality & State 和外部心率字段。通过 `30~45°C` 佩戴窗口和 M601 校验的有效样本，在 `WARMING` 阶段即可附带 Skin Temperature；连续 5 个原始样本落在正常 `35~38°C` 区间，或累计 30 个佩戴窗口内有效样本后进入 `STABLE`，否则 Quality 会标记为 Poor。核心字段仍保持 `0x7FFF`，直到达到稳定资格。通用头文件默认 `RIDER_CORE_TEMP_PUBLISH_MODE=SHADOW`，但当前 AC632N 板级 bring-up 显式选择 `CONTACT_PROXY`：稳定接触后把滤波后的 M601 单点皮肤/接触温度映射到 CORE/HTS 核心字段，解决旧码表完全收不到温度的问题；该值是固定位置的皮肤/接触代理，不是经过参考数据验证的核心体温。核心温度只由多个有效皮肤样本经过个体化模型估算；只有完成留出时段验证并启用 `STRICT` 模式后才发布核心估算。Quality 低 4 位反映滤波后的温度信号质量；没有外部心率时，仅心率关联状态表示“支持但未收到信号”。Control Point 只实现协议文档中约定的外部心率输入 `0x13`，其他操作返回“不支持”。核心无效温度编码为 `0x7FFF`。
 
-标准 Health Thermometer 使用 IEEE 11073 FLOAT，分辨率为 `10^-2 °C`；无效值使用 NaN mantissa `0x007FFFFF`。`2A1C` 提供 **Read + Notify**，兼容 DURA 在订阅前主动读取当前值的流程；Temperature Type 由独立的 `2A1D` 读取。CCCD 写响应完成后，固件在 ATT 可发送窗口推送首帧，后续按约 10 秒节拍发送。自定义 CORE `0x2101` 按采样节拍约 1 Hz 发送：通过佩戴窗口的 `WARMING`/`STABLE` 样本可带 Skin Temperature 代理，核心字段和标准 HTS 仍按稳定/核心发布门控处理。profile 保持 CORE 自定义服务在 HTS 之前，但 Central 必须按 UUID 发现服务和特征，不能依赖句柄或服务序号。当前板级 `CONTACT_PROXY` 和经过验证的 `STRICT` 模式都可附带 Manufacturer Specific Data 温度字段；`SHADOW` 模式省略无效温度，广播温度单位为千分之一摄氏度。为避免旧式广播数据更新产生的停播/重启窗口，未连接期间只在测量可用状态改变时刷新广播；每次断开连接后会在 SDK 自动恢复广播前装入最新温度。当前传感器只提供接触点温度；通过佩戴窗口的预热值只能作为皮肤附近代理，核心温度仅是经过参考数据标定的个体化估算。平均核心温度属于码表侧历史统计，未知字段不会被编码为 0 值伪造。算法研究与标定流程见 [`doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md`](../../doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md)。
+标准 Health Thermometer 使用 IEEE 11073 FLOAT，分辨率为 `10^-2 °C`；无效值使用 NaN mantissa `0x007FFFFF`。`2A1C` 提供 **Read + Notify**，兼容 DURA 在订阅前主动读取当前值的流程；Temperature Type 由独立的 `2A1D` 读取。CCCD 写响应完成后，固件在 ATT 可发送窗口推送首帧，后续按约 10 秒节拍发送。自定义 CORE `0x2101` 按采样节拍约 1 Hz 发送：通过佩戴窗口的 `WARMING`/`STABLE` 样本可带 M601 单点皮肤温度，核心字段和标准 HTS 仍按稳定/核心发布门控处理。profile 保持 CORE 自定义服务在 HTS 之前，但 Central 必须按 UUID 发现服务和特征，不能依赖句柄或服务序号。当前板级 `CONTACT_PROXY` 和经过验证的 `STRICT` 模式都可附带 Manufacturer Specific Data 温度字段；`SHADOW` 模式省略无效温度，广播温度单位为千分之一摄氏度。为避免旧式广播数据更新产生的停播/重启窗口，未连接期间只在测量可用状态改变时刷新广播；每次断开连接后会在 SDK 自动恢复广播前装入最新温度。当前 M601 直接测量固定贴肤点，皮肤字段是该位置的滤波值；核心温度仅是多个有效皮肤样本经过参考数据标定的个体化估算。平均核心温度属于码表侧历史统计，未知字段不会被编码为 0 值伪造。算法研究与标定流程见 [`doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md`](../../doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md)。
 
 Battery Level 始终返回协议规定的 `0-100`。当前板级没有独立 fuel-gauge，固件使用 AC632N `AD_CH_VBAT` 的电压估算：默认 `3.30V=0%`、`4.22V=100%`，阈值位于 `board/bd19/board_ac632n_rider_cfg.h`，必须按实际电池和分压校准。该值是电压估算，不代表精确剩余容量。
 
@@ -108,7 +108,7 @@ PB7 (`IO_PORTB_07`) 由 M601 1-Wire 总线独占：
 
 `-40.00°C` 到 `125.00°C` 是 M601 的电气/物理读数范围，不是佩戴判定。应用估算层另用默认 `30.00°C` 到 `45.00°C` 的产品区间过滤环境读数；例如脱离人体后常见的 `23.00°C` 会被标记为 `RIDER_TEMP_STATUS_NOT_WORN`（status=4），不会成为有效核心温度。该区间定义在 `include/rider_core_temp.h`，量产时可按结构和实测校准。
 
-无设备、CRC 错误、物理范围错误、未佩戴或连续约 3 秒没有新序号的样本都会保留为无效快照并进入 `STALE`；ATT Read 返回协议规定的无效哨兵值。通过佩戴窗口但尚未完成预热的样本只允许进入自定义 CORE 的 Skin Temperature 代理字段，核心字段仍为 `0x7FFF`，HTS 和温度广播仍等待核心发布门控；板级 `CONTACT_PROXY` 也只在稳定接触后把滤波后的接触温度送入 CORE/HTS/广播。这样码表不会把断报或 `23°C` 当成低温样本参与平均；但 Skin/CONTACT_PROXY 的历史平均应理解为皮肤附近或接触温度趋势，不应标注为已验证核心体温。平均温度仍由码表对有效历史样本自行统计。
+无设备、CRC 错误、物理范围错误、未佩戴或连续约 3 秒没有新序号的样本都会保留为无效快照并进入 `STALE`，并清空当前预热资格；ATT Read 返回协议规定的无效哨兵值。通过佩戴窗口但尚未完成预热的样本只允许进入自定义 CORE 的 Skin Temperature 字段，核心字段仍为 `0x7FFF`，HTS 和温度广播仍等待核心发布门控；板级 `CONTACT_PROXY` 也只在稳定接触后把滤波后的 M601 皮肤/接触温度送入 CORE/HTS/广播。这样码表不会把断报或 `23°C` 当成低温样本参与平均；Skin/CONTACT_PROXY 的历史平均应理解为固定位置皮肤或接触温度趋势，不应标注为已验证核心体温。平均温度仍由码表对有效历史样本自行统计。
 
 ## 串口诊断日志
 

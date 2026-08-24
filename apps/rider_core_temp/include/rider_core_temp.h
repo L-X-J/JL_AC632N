@@ -30,7 +30,8 @@ enum rider_temperature_status {
 
 /* The state describes the signal lifecycle, independently of the 1-Wire
  * transport status.  A valid sample inside the wear window may be exposed as
- * a skin-near proxy while warming; core publication still requires stability. */
+ * the single-site skin/contact temperature while warming; core publication
+ * still requires stability. */
 enum rider_temperature_state {
     RIDER_TEMP_STATE_NO_DEVICE = 0,
     RIDER_TEMP_STATE_NOT_WORN = 1,
@@ -62,10 +63,14 @@ enum rider_temperature_freshness {
 #define RIDER_CORE_TEMP_WEAR_MAX_CENTI       4500
 
 /* Filter parameters are deliberately conservative for the fixed chest-strap
- * prototype.  They remain compile-time product settings until field data is
- * available to calibrate the mechanical design and wear window. */
+ * prototype.  The normal-band shortcut accelerates qualification when five
+ * consecutive readings already look like ordinary skin temperature; the
+ * broader 30-sample path remains the fallback for slower warm-up episodes. */
 #define RIDER_TEMP_FILTER_MEDIAN_SAMPLES     5
 #define RIDER_TEMP_FILTER_STABLE_SAMPLES     30
+#define RIDER_TEMP_FILTER_NORMAL_SAMPLES     5
+#define RIDER_TEMP_FILTER_NORMAL_MIN_CENTI   3500
+#define RIDER_TEMP_FILTER_NORMAL_MAX_CENTI   3800
 #define RIDER_TEMP_FILTER_MAX_GAP_SAMPLES    3
 #define RIDER_TEMP_STALE_AFTER_TICKS         3
 #define RIDER_TEMP_FILTER_EWMA_ALPHA_Q8      64
@@ -138,7 +143,7 @@ typedef struct {
     int16_t slope_centi_per_min;
     uint8_t valid;
     uint8_t contact_valid;
-    uint8_t skin_valid;              /* Filtered skin-near proxy after wear gate. */
+    uint8_t skin_valid;              /* Filtered single-site skin/contact value. */
     uint8_t core_estimate_valid;     /* Numerical candidate is available. */
     uint8_t core_estimate_verified;  /* Held-out validation gate has passed. */
     uint8_t quality;

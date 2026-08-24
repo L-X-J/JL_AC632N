@@ -184,10 +184,11 @@ void rider_estimator_init(void)
 }
 
 /**
- * Consume one validated M601 sample and publish a filtered skin-near proxy.
+ * Consume one validated M601 sample and publish filtered single-site skin
+ * temperature. The core estimate is a separate model over these samples.
  *
  * The numerical core model is deliberately shadow-only until an offline
- * calibration is installed. The skin-near proxy is available during WARMING;
+ * calibration is installed. The skin value is available during WARMING;
  * CONTACT_PROXY still exposes a separate stable contact value for bring-up,
  * without treating a guessed offset as a core estimate.
  */
@@ -215,9 +216,9 @@ void rider_estimator_consume(const rider_temperature_sample_t *sample)
     rider_snapshot.contact_temperature_centi =
         filtered.filtered_temperature_centi;
     rider_snapshot.contact_valid = 1;
-    /* The wear window already rejects ambient values. Expose the filtered
-     * skin-near proxy during WARMING so clients can observe convergence;
-     * core publication below remains gated by STABLE. */
+    /* The wear window already rejects ambient values. Treat the filtered M601
+     * contact value as the single-site skin temperature; core publication
+     * below remains gated by the multi-sample stable state. */
     rider_snapshot.skin_valid = filtered.valid;
     rider_snapshot.skin_temperature_centi = rider_snapshot.skin_valid
                                                 ? filtered.filtered_temperature_centi

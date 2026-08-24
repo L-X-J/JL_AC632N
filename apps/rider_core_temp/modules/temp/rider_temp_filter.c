@@ -17,7 +17,9 @@ typedef struct {
     uint8_t have_sequence;
     uint8_t have_filtered;
     uint32_t last_sequence;
-    uint16_t stable_samples;
+    uint16_t valid_samples;
+    uint8_t normal_samples;
+    uint8_t stable_latched;
     int16_t filtered_temperature_centi;
     int16_t previous_filtered_centi;
 } rider_temperature_filter_state_t;
@@ -30,7 +32,9 @@ static void rider_filter_reset_history(void)
     memset(rider_filter.history, 0, sizeof(rider_filter.history));
     rider_filter.history_count = 0;
     rider_filter.history_write = 0;
-    rider_filter.stable_samples = 0;
+    rider_filter.valid_samples = 0;
+    rider_filter.normal_samples = 0;
+    rider_filter.stable_latched = 0;
     rider_filter.have_filtered = 0;
     rider_filter.filtered_temperature_centi = 0;
     rider_filter.previous_filtered_centi = 0;
@@ -96,6 +100,13 @@ static int16_t rider_filter_ewma(int16_t previous, int16_t input)
         step = -(((-step) + 128) / 256);
     }
     return (int16_t)(previous + step);
+}
+
+/** Return whether a raw reading is in the accelerated skin-temperature band. */
+static uint8_t rider_filter_in_normal_band(int16_t temperature_centi)
+{
+    return temperature_centi >= RIDER_TEMP_FILTER_NORMAL_MIN_CENTI &&
+           temperature_centi <= RIDER_TEMP_FILTER_NORMAL_MAX_CENTI;
 }
 
 /** Reset the filter and start a new temporal contact episode. */
@@ -189,18 +200,31 @@ void rider_temp_filter_consume(const rider_temperature_sample_t *sample,
         }
     }
 
-    if (rider_filter.stable_samples < RIDER_TEMP_FILTER_STABLE_SAMPLES) {
-        rider_filter.stable_samples++;
+    if (rider_filter.valid_samples < RIDER_TEMP_FILTER_STABLE_SAMPLES) {
+        rider_filter.valid_samples++;
+    }
+    if (!rider_filter.stable_latched) {
+        if (rider_filter_in_normal_band(sample->temperature_centi)) {
+            if (rider_filter.normal_samples < RIDER_TEMP_FILTER_NORMAL_SAMPLES) {
+                rider_filter.normal_samples++;
+            }
+        } else {
+            rider_filter.normal_samples = 0;
+        }
+        if (rider_filter.valid_samples >= RIDER_TEMP_FILTER_STABLE_SAMPLES ||
+            rider_filter.normal_samples >= RIDER_TEMP_FILTER_NORMAL_SAMPLES) {
+            /* Qualification is latched for this continuous wear episode. A
+             * later in-window fluctuation must not make BLE state oscillate. */
+            rider_filter.stable_latched = 1;
+        }
     }
     output->sequence = sample->sequence;
     output->filtered_temperature_centi = rider_filter.filtered_temperature_centi;
     output->slope_centi_per_min = slope;
     output->valid = 1;
     output->status = RIDER_TEMP_STATUS_OK;
-    output->state = rider_filter.stable_samples >=
-                    RIDER_TEMP_FILTER_STABLE_SAMPLES
-                        ? RIDER_TEMP_STATE_STABLE
-                        : RIDER_TEMP_STATE_WARMING;
+    output->state = rider_filter.stable_latched ? RIDER_TEMP_STATE_STABLE
+                                                : RIDER_TEMP_STATE_WARMING;
     if (output->state == RIDER_TEMP_STATE_STABLE) {
         output->quality = (slope < -RIDER_TEMP_FILTER_SLOPE_LIMIT_CPM ||
                            slope > RIDER_TEMP_FILTER_SLOPE_LIMIT_CPM)

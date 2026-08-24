@@ -40,7 +40,7 @@ static u8 rider_battery_pending;
 static u8 rider_last_battery_level;
 static u8 rider_battery_level_valid;
 
-/** Return whether the custom CORE frame can carry a skin-near value.
+/** Return whether the custom CORE frame can carry a skin/contact value.
  * The wear gate and filter reject ambient/invalid samples; core publication
  * has a separate stability check below. */
 static u8 rider_temperature_notification_allowed(
