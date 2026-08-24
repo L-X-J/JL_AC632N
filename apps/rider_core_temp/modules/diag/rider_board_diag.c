@@ -168,17 +168,21 @@ static void rider_diag_render_status(const rider_temperature_snapshot_t *snapsho
     }
 
     /* Green LED2 is deliberately driven by the complete signal contract:
-     * only a fresh, valid STABLE episode is steady. This prevents an old
-     * contact sample or an invalid state from looking like a locked reading. */
+     * only a fresh, valid STABLE episode whose sample is accepted by the core
+     * model is steady. A warming or detach-candidate episode keeps blinking,
+     * so the LED never presents a held/uncertain core value as locked. */
     if (snapshot && snapshot->contact_valid &&
         snapshot->sensor_status == RIDER_TEMP_STATUS_OK &&
         snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH &&
-        snapshot->temperature_state == RIDER_TEMP_STATE_STABLE) {
+        snapshot->temperature_state == RIDER_TEMP_STATE_STABLE &&
+        snapshot->core_input_valid) {
         rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, 1);
     } else if (snapshot && snapshot->contact_valid &&
                snapshot->sensor_status == RIDER_TEMP_STATUS_OK &&
                snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH &&
-               snapshot->temperature_state == RIDER_TEMP_STATE_WARMING) {
+               (snapshot->temperature_state == RIDER_TEMP_STATE_WARMING ||
+                (snapshot->temperature_state == RIDER_TEMP_STATE_STABLE &&
+                 !snapshot->core_input_valid))) {
         rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT,
                            (rider_diag_tick_count % 10) < 5);
     } else if (sensor_fault && snapshot->sensor_status == RIDER_TEMP_STATUS_NO_DEVICE) {
@@ -210,12 +214,13 @@ static void rider_diag_dump_state(void)
     enum rider_ble_state ble_state = rider_core_temp_ble_state();
 
     rider_estimator_copy_snapshot(&snapshot);
-    log_info("button dump: ble=%u contact_valid=%u skin_valid=%u core_valid=%u "
+    log_info("button dump: ble=%u contact_valid=%u skin_valid=%u core_input=%u core_valid=%u "
              "core_verified=%u status=%u state=%u freshness=%u seq=%u "
              "contact_centi=%d "
              "skin_centi=%d core_centi=%d confidence=%u warmup=%u/%u\n",
              (unsigned)ble_state, (unsigned)snapshot.contact_valid,
              (unsigned)snapshot.skin_valid,
+             (unsigned)snapshot.core_input_valid,
              (unsigned)snapshot.core_estimate_valid,
              (unsigned)snapshot.core_estimate_verified,
              (unsigned)snapshot.sensor_status,

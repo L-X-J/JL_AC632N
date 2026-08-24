@@ -150,6 +150,7 @@ c_SRC_FILES := \
 	../../../../apps/rider_core_temp/config/lib_update_config.c \
 	../../../../apps/rider_core_temp/config/log_config.c \
 	../../../../apps/rider_core_temp/modules/bt/core_temp_gatt.c \
+	../../../../apps/rider_core_temp/modules/bt/rider_temp_codec.c \
 	../../../../apps/rider_core_temp/modules/bt/rider_ble_lifecycle.c \
 	../../../../apps/rider_core_temp/modules/diag/rider_board_diag.c \
 	../../../../apps/rider_core_temp/modules/main/rider_core_temp_app.c \

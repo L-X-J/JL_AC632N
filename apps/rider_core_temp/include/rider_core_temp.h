@@ -37,7 +37,8 @@ enum rider_temperature_state {
     RIDER_TEMP_STATE_NOT_WORN = 1,
     RIDER_TEMP_STATE_WARMING = 2,
     RIDER_TEMP_STATE_STABLE = 3,
-    RIDER_TEMP_STATE_STALE = 4,
+    RIDER_TEMP_STATE_DETACH_SUSPECTED = 4,
+    RIDER_TEMP_STATE_STALE = 5,
 };
 
 enum rider_temperature_quality {
@@ -75,6 +76,13 @@ enum rider_temperature_freshness {
 #define RIDER_TEMP_STALE_AFTER_TICKS         3
 #define RIDER_TEMP_FILTER_EWMA_ALPHA_Q8      64
 #define RIDER_TEMP_FILTER_SLOPE_LIMIT_CPM    150
+/* A fast fall starts a hold-off before the core model sees the sample. The
+ * values are product bring-up defaults, not physiological constants; they
+ * must be calibrated with real detach/re-attach traces before release. */
+#define RIDER_TEMP_FILTER_DETACH_SLOPE_CPM   (-180)
+#define RIDER_TEMP_FILTER_DETACH_CONFIRM_SAMPLES 5
+#define RIDER_TEMP_FILTER_DETACH_MIN_DROP_CENTI 50
+#define RIDER_TEMP_FILTER_DETACH_RECOVERY_SLOPE_CPM 30
 
 /* Publication is intentionally separate from model validity. EXPERIMENTAL
  * publishes the unverified candidate so real rides can be recorded; STRICT
@@ -124,6 +132,7 @@ typedef struct {
     uint16_t valid_samples; /* Valid samples in the current wear episode. */
     uint8_t normal_samples; /* Samples in the accelerated 35~38 C band. */
     uint8_t valid;
+    uint8_t core_input_valid; /* False while a possible detach is evaluated. */
     uint8_t quality;
     uint8_t status;
     uint8_t state;
@@ -147,6 +156,7 @@ typedef struct {
     uint8_t valid;
     uint8_t contact_valid;
     uint8_t skin_valid;              /* Filtered single-site skin/contact value. */
+    uint8_t core_input_valid;         /* Current sample may update the model. */
     uint8_t core_estimate_valid;     /* Numerical candidate is available. */
     uint8_t core_estimate_verified;  /* Held-out validation gate has passed. */
     uint8_t quality;

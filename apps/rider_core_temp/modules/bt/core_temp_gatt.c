@@ -1,6 +1,7 @@
 #include "system/includes.h"
 #include "app_config.h"
 #include "rider_core_temp.h"
+#include "rider_temp_codec.h"
 #include "core_temp_profile.h"
 #include "gatt_common/le_gatt_common.h"
 #include "le_common.h"
@@ -20,8 +21,8 @@
 #define RIDER_ATT_CBUFFER_SIZE          512
 #define RIDER_STANDARD_PERIOD_SECONDS   10
 #define RIDER_EXTERNAL_HR_TIMEOUT       15
-#define RIDER_CORE_FRAME_MAX            9
-#define RIDER_STANDARD_TEMPERATURE_FRAME_SIZE 5
+#define RIDER_CORE_FRAME_MAX            RIDER_TEMP_CODEC_CORE_FRAME_MAX
+#define RIDER_STANDARD_TEMPERATURE_FRAME_SIZE RIDER_TEMP_CODEC_STANDARD_FRAME_SIZE
 
 static u8 rider_adv_data[RIDER_ADV_PACKET_MAX];
 static u8 rider_scan_rsp_data[RIDER_ADV_PACKET_MAX];
@@ -128,7 +129,7 @@ static void rider_log_temperature_snapshot(const char *stage,
     log_info("Rider temperature %s: seq=%u valid=%u status=%u state=%u "
              "freshness=%u contact_centi=%d skin_centi=%d core_est_centi=%d "
              "publish_mode=%u publish_core_centi=%d "
-             "contact_valid=%u skin_valid=%u core_valid=%u core_verified=%u "
+             "contact_valid=%u skin_valid=%u core_input=%u core_valid=%u core_verified=%u "
              "quality=%u confidence=%u\n",
              stage ? stage : "unknown",
              snapshot ? (unsigned)snapshot->sequence : 0,
@@ -146,6 +147,7 @@ static void rider_log_temperature_snapshot(const char *stage,
              (int)rider_core_frame_value(snapshot),
              snapshot ? (unsigned)snapshot->contact_valid : 0,
              snapshot ? (unsigned)snapshot->skin_valid : 0,
+             snapshot ? (unsigned)snapshot->core_input_valid : 0,
              snapshot ? (unsigned)snapshot->core_estimate_valid : 0,
              snapshot ? (unsigned)snapshot->core_estimate_verified : 0,
              snapshot ? (unsigned)snapshot->quality : RIDER_TEMP_QUALITY_NA,
@@ -355,48 +357,8 @@ static void rider_refresh_battery(void)
 static u16 rider_make_core_frame(u8 *frame, u16 frame_size,
                                  const rider_temperature_snapshot_t *snapshot)
 {
-    int16_t core = rider_core_frame_value(snapshot);
-    int16_t skin = 0x7fff;
-    u8 flags = 0x04; /* Quality & State is present; core is mandatory. */
-    u8 quality_state = snapshot ? (snapshot->quality & 0x0f) : 0x07;
-    u16 length = 0;
-
-    if (!frame || frame_size < 4) {
-        return 0;
-    }
-    /* Control Point 0x13 is implemented, so distinguish "supported but no
-     * signal" (01) from "not supported" (00) in the quality high nibble. */
-    quality_state |= 0x10;
-    if (snapshot && snapshot->skin_valid) {
-        flags |= 0x01;
-        skin = snapshot->skin_temperature_centi;
-    }
-    if (snapshot && snapshot->heart_rate_valid) {
-        flags |= 0x10;
-        quality_state = (quality_state & (u8)~0x30) | 0x20;
-    }
-
-    frame[length++] = flags;
-    frame[length++] = (u8)core;
-    frame[length++] = (u8)((u16)core >> 8);
-    if (flags & 0x01) {
-        if (frame_size < length + 2) {
-            return 0;
-        }
-        frame[length++] = (u8)skin;
-        frame[length++] = (u8)((u16)skin >> 8);
-    }
-    if (frame_size < length + 1) {
-        return 0;
-    }
-    frame[length++] = quality_state;
-    if (flags & 0x10) {
-        if (frame_size < length + 1) {
-            return 0;
-        }
-        frame[length++] = snapshot->heart_rate;
-    }
-    return length;
+    return rider_encode_core_temperature_frame(
+        frame, frame_size, rider_core_frame_value(snapshot), snapshot);
 }
 
 /** Send the custom CORE value once its notification CCCD and ATT queue allow it. */
@@ -426,28 +388,10 @@ static int rider_send_core_temperature_now(void)
 static u16 rider_make_standard_temperature(u8 *value, u16 value_size,
                                             const rider_temperature_snapshot_t *snapshot)
 {
-    int32_t mantissa;
-
-    /* CORE's published HTS implementation uses Flag + IEEE-11073 FLOAT.
-     * Temperature Type is exposed by the separate 0x2A1D characteristic. */
-    if (!value || value_size < RIDER_STANDARD_TEMPERATURE_FRAME_SIZE) {
-        return 0;
-    }
-    value[0] = 0x04; /* Celsius; CORE keeps the type-present flag for 0x2A1D. */
-    if (!snapshot || !rider_standard_temperature_allowed(snapshot)) {
-        mantissa = 0x007fffff; /* IEEE-11073 FLOAT NaN mantissa. */
-        value[1] = (u8)mantissa;
-        value[2] = (u8)(mantissa >> 8);
-        value[3] = (u8)(mantissa >> 16);
-        value[4] = 0;
-    } else if (rider_standard_temperature_allowed(snapshot)) {
-        mantissa = rider_core_frame_value(snapshot);
-        value[1] = (u8)mantissa;
-        value[2] = (u8)(mantissa >> 8);
-        value[3] = (u8)(mantissa >> 16);
-        value[4] = 0xfe; /* 10^-2 Celsius. */
-    }
-    return RIDER_STANDARD_TEMPERATURE_FRAME_SIZE;
+    return rider_encode_standard_temperature_frame(
+        value, value_size,
+        snapshot && rider_standard_temperature_allowed(snapshot),
+        rider_core_frame_value(snapshot));
 }
 
 /** Send the standard HTS value once its CCCD and ATT queue allow it. */

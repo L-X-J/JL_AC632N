@@ -110,6 +110,7 @@ static void rider_estimator_clear_measurement(uint8_t status, uint8_t state)
     rider_snapshot.valid = 0;
     rider_snapshot.contact_valid = 0;
     rider_snapshot.skin_valid = 0;
+    rider_snapshot.core_input_valid = 0;
     rider_snapshot.core_estimate_valid = 0;
     rider_snapshot.core_estimate_verified = 0;
     rider_snapshot.contact_temperature_centi = 0x7fff;
@@ -150,7 +151,17 @@ static void rider_estimator_update_core_model(
     int32_t slope_term;
     uint8_t alpha;
 
-    if (!rider_calibration.available || !filtered || !filtered->valid ||
+    if (!filtered || !filtered->core_input_valid) {
+        /* Hold the internal Q8 state across a suspected detach, but do not
+         * expose the held value as a fresh core measurement. A confirmed
+         * detach arrives through the invalid path and resets the model. */
+        rider_snapshot.core_estimate_valid = 0;
+        rider_snapshot.core_estimate_verified = 0;
+        rider_snapshot.core_temperature_centi = 0x7fff;
+        return;
+    }
+
+    if (!rider_calibration.available || !filtered->valid ||
         filtered->state != RIDER_TEMP_STATE_STABLE ||
         filtered->quality < RIDER_TEMP_QUALITY_FAIR ||
         (RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_STRICT &&
@@ -241,6 +252,7 @@ void rider_estimator_consume(const rider_temperature_sample_t *sample)
     rider_snapshot.sensor_status = filtered.status;
     rider_snapshot.temperature_state = filtered.state;
     rider_snapshot.data_freshness = filtered.freshness;
+    rider_snapshot.core_input_valid = filtered.core_input_valid;
     rider_snapshot.warmup_valid_samples = filtered.valid_samples;
     rider_snapshot.warmup_normal_samples = filtered.normal_samples;
     rider_snapshot.slope_centi_per_min = filtered.slope_centi_per_min;
@@ -263,7 +275,8 @@ void rider_estimator_consume(const rider_temperature_sample_t *sample)
     /* The wear window already rejects ambient values. Treat the filtered M601
      * contact value as the single-site skin temperature; core publication
      * below remains gated by the multi-sample stable state. */
-    rider_snapshot.skin_valid = filtered.valid;
+    rider_snapshot.skin_valid = filtered.valid &&
+                                filtered.state != RIDER_TEMP_STATE_DETACH_SUSPECTED;
     rider_snapshot.skin_temperature_centi = rider_snapshot.skin_valid
                                                 ? filtered.filtered_temperature_centi
                                                 : 0x7fff;
@@ -294,13 +307,14 @@ void rider_estimator_consume(const rider_temperature_sample_t *sample)
 #endif
 
     log_info("Estimator snapshot: seq=%u valid=%u status=%u state=%u "
-             "contact_centi=%d skin=%s core_est=%s verified=%s "
+             "contact_centi=%d skin=%s core_input=%s core_est=%s verified=%s "
              "confidence=%u slope_cpm=%d warmup=%u/%u\n",
              (unsigned)filtered.sequence, (unsigned)rider_snapshot.valid,
              (unsigned)rider_snapshot.sensor_status,
              (unsigned)rider_snapshot.temperature_state,
              (int)rider_snapshot.contact_temperature_centi,
              rider_snapshot.skin_valid ? "valid" : "NA",
+             rider_snapshot.core_input_valid ? "yes" : "hold",
              rider_snapshot.core_estimate_valid ? "valid" : "NA",
              rider_snapshot.core_estimate_verified ? "yes" : "no",
              (unsigned)rider_snapshot.confidence,

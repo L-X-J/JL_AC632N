@@ -20,14 +20,18 @@ typedef struct {
     uint16_t valid_samples;
     uint8_t normal_samples;
     uint8_t stable_latched;
+    uint8_t detach_candidate_samples;
+    uint8_t detach_latched;
+    uint8_t detach_recovery_samples;
     int16_t filtered_temperature_centi;
     int16_t previous_filtered_centi;
+    int16_t detach_peak_centi;
 } rider_temperature_filter_state_t;
 
 static rider_temperature_filter_state_t rider_filter;
 
-/** Reset the short history while retaining the transport sequence marker. */
-static void rider_filter_reset_history(void)
+/** Clear signal history while retaining the transport sequence marker. */
+static void rider_filter_clear_signal_history(void)
 {
     memset(rider_filter.history, 0, sizeof(rider_filter.history));
     rider_filter.history_count = 0;
@@ -40,6 +44,16 @@ static void rider_filter_reset_history(void)
     rider_filter.previous_filtered_centi = 0;
 }
 
+/** Reset the current contact episode, including detach detection state. */
+static void rider_filter_reset_history(void)
+{
+    rider_filter_clear_signal_history();
+    rider_filter.detach_candidate_samples = 0;
+    rider_filter.detach_latched = 0;
+    rider_filter.detach_recovery_samples = 0;
+    rider_filter.detach_peak_centi = 0;
+}
+
 /** Fill an unavailable filter result without inventing a temperature value. */
 static void rider_filter_set_invalid(rider_temperature_filter_output_t *output,
                                      uint8_t status, uint8_t state)
@@ -48,6 +62,7 @@ static void rider_filter_set_invalid(rider_temperature_filter_output_t *output,
     output->sequence = rider_filter.last_sequence;
     output->filtered_temperature_centi = 0x7fff;
     output->slope_centi_per_min = 0;
+    output->core_input_valid = 0;
     output->quality = RIDER_TEMP_QUALITY_INVALID;
     output->status = status;
     output->state = state;
@@ -113,6 +128,56 @@ static uint8_t rider_filter_in_normal_band(int16_t temperature_centi)
 {
     return temperature_centi >= RIDER_TEMP_FILTER_NORMAL_MIN_CENTI &&
            temperature_centi <= RIDER_TEMP_FILTER_NORMAL_MAX_CENTI;
+}
+
+/** Track a fast cooling episode before it is allowed to affect core output.
+ *
+ * A single falling sample is not enough to call a detach: cold airflow,
+ * motion, or strap pressure can produce a short transient. Once a fast fall
+ * starts, the candidate remains held while the filtered signal is flat or
+ * still falling. A meaningful rise cancels it. Confirmation requires both a
+ * minimum cumulative drop and a contiguous no-recovery interval.
+ */
+static void rider_filter_update_detach_candidate(int16_t slope)
+{
+    int16_t drop_centi;
+
+    if (rider_filter.detach_latched) {
+        return;
+    }
+
+    if (!rider_filter.detach_candidate_samples) {
+        if (slope <= RIDER_TEMP_FILTER_DETACH_SLOPE_CPM) {
+            rider_filter.detach_candidate_samples = 1;
+            rider_filter.detach_peak_centi =
+                rider_filter.previous_filtered_centi;
+        }
+        return;
+    }
+
+    /* A rise of at least 0.30 C/min is treated as contact recovery. */
+    if (slope >= RIDER_TEMP_FILTER_DETACH_RECOVERY_SLOPE_CPM) {
+        rider_filter.detach_candidate_samples = 0;
+        rider_filter.detach_peak_centi = 0;
+        return;
+    }
+
+    if (rider_filter.filtered_temperature_centi >
+        rider_filter.detach_peak_centi) {
+        rider_filter.detach_peak_centi =
+            rider_filter.filtered_temperature_centi;
+    }
+    if (rider_filter.detach_candidate_samples < 0xff) {
+        rider_filter.detach_candidate_samples++;
+    }
+    drop_centi = (int16_t)(rider_filter.detach_peak_centi -
+                           rider_filter.filtered_temperature_centi);
+    if (rider_filter.detach_candidate_samples >=
+            RIDER_TEMP_FILTER_DETACH_CONFIRM_SAMPLES &&
+        drop_centi >= RIDER_TEMP_FILTER_DETACH_MIN_DROP_CENTI) {
+        rider_filter.detach_latched = 1;
+        rider_filter.detach_recovery_samples = 0;
+    }
 }
 
 /** Reset the filter and start a new temporal contact episode. */
@@ -182,6 +247,32 @@ void rider_temp_filter_consume(const rider_temperature_sample_t *sample,
         return;
     }
 
+    /* A confirmed detach stays latched until a fresh run of normal skin
+     * samples is observed. This prevents a detached sensor sitting at a
+     * cool-but-in-window temperature from becoming stable again by count. */
+    if (rider_filter.detach_latched) {
+        if (rider_filter_in_normal_band(sample->temperature_centi)) {
+            if (rider_filter.detach_recovery_samples <
+                RIDER_TEMP_FILTER_NORMAL_SAMPLES) {
+                rider_filter.detach_recovery_samples++;
+            }
+        } else {
+            rider_filter.detach_recovery_samples = 0;
+        }
+        if (rider_filter.detach_recovery_samples >=
+            RIDER_TEMP_FILTER_NORMAL_SAMPLES) {
+            rider_filter_reset_history();
+            rider_filter_set_invalid(output, RIDER_TEMP_STATUS_NOT_WORN,
+                                     RIDER_TEMP_STATE_WARMING);
+            output->sequence = sample->sequence;
+            return;
+        }
+        rider_filter_set_invalid(output, RIDER_TEMP_STATUS_NOT_WORN,
+                                 RIDER_TEMP_STATE_DETACH_SUSPECTED);
+        output->sequence = sample->sequence;
+        return;
+    }
+
     rider_filter.history[rider_filter.history_write] = sample->temperature_centi;
     rider_filter.history_write = (uint8_t)((rider_filter.history_write + 1) %
                                            RIDER_TEMP_FILTER_MEDIAN_SAMPLES);
@@ -204,6 +295,14 @@ void rider_temp_filter_consume(const rider_temperature_sample_t *sample,
                                rider_filter.previous_filtered_centi) * 60 /
                               (int32_t)sequence_gap);
         }
+    }
+
+    rider_filter_update_detach_candidate(slope);
+    if (rider_filter.detach_latched) {
+        rider_filter_set_invalid(output, RIDER_TEMP_STATUS_NOT_WORN,
+                                 RIDER_TEMP_STATE_DETACH_SUSPECTED);
+        output->sequence = sample->sequence;
+        return;
     }
 
     if (rider_filter.valid_samples < RIDER_TEMP_FILTER_STABLE_SAMPLES) {
@@ -230,6 +329,9 @@ void rider_temp_filter_consume(const rider_temperature_sample_t *sample,
     output->valid_samples = rider_filter.valid_samples;
     output->normal_samples = rider_filter.normal_samples;
     output->valid = 1;
+    /* Candidate samples remain usable as contact diagnostics, but never feed
+     * the core model until the cooling episode recovers or is rejected. */
+    output->core_input_valid = rider_filter.detach_candidate_samples == 0;
     output->status = RIDER_TEMP_STATUS_OK;
     output->state = rider_filter.stable_latched ? RIDER_TEMP_STATE_STABLE
                                                 : RIDER_TEMP_STATE_WARMING;

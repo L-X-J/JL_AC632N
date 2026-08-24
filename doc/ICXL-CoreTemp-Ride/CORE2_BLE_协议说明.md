@@ -123,7 +123,7 @@ Offset  长度  字段
 | Heart Rate | `UINT8` | BPM；值 `0` 表示当前没有心率信号 |
 | Heat Strain Index | `UINT8` | 数值 ÷ 10，范围约 `0.0`–`25.4` |
 
-核心温度为 `0x7FFF`（十进制 `32767`）时，表示 **Data not available**，不得将其换算为正常温度。M601 固定贴肤点的有效样本在 `WARMING` 或 `STABLE` 阶段可作为 Skin Temperature 字段；连续 5 个原始样本落在 `35~38°C`，或累计 30 个 `30~45°C` 佩戴窗口内有效样本，即可完成稳定资格，预热阶段核心字段仍保持 `0x7FFF`。当前 AC632N 板级选择 `EXPERIMENTAL`，达到稳定接触后 CORE 帧同时带滤波后的 M601 Skin 和多样本模型 Core 候选；该候选尚未通过参考数据验证。完成留出时段验证后才可启用 `STRICT`；`CONTACT_PROXY` 仅用于旧版本行为对比。
+核心温度为 `0x7FFF`（十进制 `32767`）时，表示 **Data not available**，不得将其换算为正常温度。M601 固定贴肤点的有效样本在 `WARMING` 或 `STABLE` 阶段可作为 Skin Temperature 字段；连续 5 个原始样本落在 `35~38°C`，或累计 30 个 `30~45°C` 佩戴窗口内有效样本，即可完成稳定资格，预热阶段核心字段仍保持 `0x7FFF`。如果滤波皮温以至少 `1.80°C/min` 快速下降、连续约 5 秒没有达到 `0.30°C/min` 的回升且累计下降达到 `0.50°C`，固件进入内部 `DETACH_SUSPECTED` 状态，冻结核心模型并把 Skin/Core 都编码为无效；重新连续 5 个 `35~38°C` 样本后清空历史并重新预热。当前 AC632N 板级选择 `EXPERIMENTAL`，达到稳定接触后 CORE 帧同时带滤波后的 M601 Skin 和多样本模型 Core 候选；该候选尚未通过参考数据验证。完成留出时段验证后才可启用 `STRICT`；`CONTACT_PROXY` 仅用于旧版本行为对比。
 
 #### Quality & State 字段
 
@@ -193,7 +193,7 @@ CORE 的行为：
 - Flags.bit1：`0`，不带时间戳；
 - Flags.bit2：`1`，携带 Temperature Type；
 - 无有效值时发送 IEEE 11073 NaN：`0x007FFFFF`；
-- CORE 官方实现和 Wear OS 示例使用 Notification CCCD；本 Rider 固件在此基础上保留 `Read`，兼容 DURA 在订阅前主动读取当前值的流程。Rider 在 `STRICT` 模式下仅发送已验证核心估算；`SHADOW` 返回 IEEE 11073 NaN；当前板级 `EXPERIMENTAL` 在稳定接触后发送模型 Core 候选。`2A1D` 单独返回 `0x02`，HTS 当前发送节拍约为 **10 秒**。自定义 `0x2101` 温度特征按采样节拍约 1 Hz 发送，`WARMING` 带 Skin 但 Core 无效，`STABLE` 同时带 Skin 和 Core 候选。
+- CORE 官方实现和 Wear OS 示例使用 Notification CCCD；本 Rider 固件在此基础上保留 `Read`，兼容 DURA 在订阅前主动读取当前值的流程。Rider 在 `STRICT` 模式下仅发送已验证核心估算；`SHADOW` 返回 IEEE 11073 NaN；当前板级 `EXPERIMENTAL` 在稳定接触后发送模型 Core 候选。`2A1D` 单独返回 `0x02`，HTS 当前发送节拍约为 **10 秒**。自定义 `0x2101` 温度特征按采样节拍约 1 Hz 发送，`WARMING` 带 Skin 但 Core 无效，`STABLE` 同时带 Skin 和 Core 候选；`DETACH_SUSPECTED` 期间不发送有效 Skin/Core。
 
 ### 5.2 连接时序和认证
 

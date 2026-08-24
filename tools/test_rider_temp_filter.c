@@ -65,7 +65,43 @@ static void test_small_cooling_trend_is_preserved(void)
         output = feed(sequence, 3599, 1, RIDER_TEMP_STATUS_OK);
     }
     assert(output.valid);
+    assert(output.core_input_valid);
     assert(output.filtered_temperature_centi < 3600);
+}
+
+/** Verify fast cooling is held out of the core model until it recovers. */
+static void test_fast_cooling_confirms_detach(void)
+{
+    rider_temperature_filter_output_t output;
+    uint32_t sequence;
+
+    rider_temp_filter_init();
+    for (sequence = 1; sequence <= RIDER_TEMP_FILTER_NORMAL_SAMPLES; ++sequence) {
+        output = feed(sequence, 3600, 1, RIDER_TEMP_STATUS_OK);
+    }
+    assert(output.state == RIDER_TEMP_STATE_STABLE);
+
+    for (sequence = RIDER_TEMP_FILTER_NORMAL_SAMPLES + 1;
+         sequence <= RIDER_TEMP_FILTER_NORMAL_SAMPLES + 12; ++sequence) {
+        output = feed(sequence, 3300, 1, RIDER_TEMP_STATUS_OK);
+    }
+    assert(!output.valid);
+    assert(output.state == RIDER_TEMP_STATE_DETACH_SUSPECTED);
+    assert(!output.core_input_valid);
+
+    /* Re-attachment requires a new normal-band run and then a new warm-up. */
+    for (sequence = RIDER_TEMP_FILTER_NORMAL_SAMPLES + 13;
+         sequence <= RIDER_TEMP_FILTER_NORMAL_SAMPLES + 17; ++sequence) {
+        output = feed(sequence, 3600, 1, RIDER_TEMP_STATUS_OK);
+    }
+    assert(!output.valid);
+    assert(output.state == RIDER_TEMP_STATE_WARMING);
+    for (sequence = RIDER_TEMP_FILTER_NORMAL_SAMPLES + 18;
+         sequence <= RIDER_TEMP_FILTER_NORMAL_SAMPLES * 2 + 17; ++sequence) {
+        output = feed(sequence, 3600, 1, RIDER_TEMP_STATUS_OK);
+    }
+    assert(output.valid);
+    assert(output.state == RIDER_TEMP_STATE_STABLE);
 }
 
 /** Verify five consecutive normal skin readings qualify the episode early. */
@@ -173,6 +209,7 @@ int main(void)
     test_not_worn_sample_is_dropped();
     test_median_rejects_an_in_window_spike();
     test_small_cooling_trend_is_preserved();
+    test_fast_cooling_confirms_detach();
     test_warming_and_stable_boundaries();
     test_broad_wear_window_fallback();
     test_normal_band_count_resets_without_losing_validity();
