@@ -47,6 +47,8 @@ AC63 系列通用蓝牙SDK 固件程序
 
 * 蓝牙应用 : [Rider CoreTemp](./apps/rider_core_temp)，AC632N 单 BLE 外设，用于 PB7 上的 M601 温度采集和 CORE 兼容协议广播。
 
+* 微信小程序调试台 : [Rider CoreTemp Debug](./wechat_miniprogram/rider_core_temp_debug)，连接 Rider 固件的 `0x2110/0x2111` 调试服务，按 200 ms 接收最新温度快照并导出 CSV。
+
 * 蓝牙应用 : [HID](./apps/hid), 适用领域：遥控器, 自拍器, 键盘, 鼠标, 吃鸡王座, 语音遥控器. [文档链接](https://doc.zh-jieli.com/AC63/zh-cn/master/module_demo/hid/index.html)
 
 * 蓝牙应用 : [Mesh](./apps/mesh), 适用领域：物联网节点, 天猫精灵接入, 自组网应用. [文档链接](https://doc.zh-jieli.com/AC63/zh-cn/master/module_demo/mesh/index.html)
@@ -113,7 +115,7 @@ AGENT.md            架构约束真相源
 
 ### Rider CoreTemp 固件
 
-进入 `apps/rider_core_temp` 后，可使用 `make ac632n_rider_core_temp` 构建独立固件。应用只启用 BLE 外设角色，设备名固定为 `ICXL-RTemp`；PB7 由 `modules/temp/m601_1wire.c` 独占，`modules/temp/rider_temp_filter.c` 负责滤波和佩戴状态，`modules/bt/core_temp_gatt.c` 编排 GATT、`modules/bt/rider_temp_codec.c` 负责可测试的温度字节编码，J12 LED/按键诊断由 `modules/diag/rider_board_diag.c` 提供。温度链路明确保留 Sensor、Trusted Skin、Experimental Core 三条时间线：`30~45°C` 是宽泛佩戴保护窗，5 个样本只填满中值窗口，连续约 30 秒有效接触后才建立可信皮温；`32~40°C` 仅作为典型胸部贴肤和脱落恢复证据，不能提前跳过 30 秒门控。可信后，自定义 CORE 约 1 Hz 稳定上报 Skin，核心字段先保持 `0x7FFF`；Core V1 再积累约 5 分钟可信皮温历史，随后约 1 Hz 更新实验性核心候选，HTS 约每 10 秒上报一次 Core。滤波温度快速下降时立即暂停可信 Skin/Core，确认脱落或断报会清空当前 episode；重新贴肤须回到脱落前峰值附近并重新完成可信与模型预热。通用头文件默认使用 `SHADOW`；当前 AC632N 板级显式使用 `EXPERIMENTAL`，用于把可追溯但尚未验证的核心候选送到码表导出，不能宣称为医疗或已验证核心体温。完成完整骑行 Session 留出标定后才可切换 `STRICT`。平均温度仍由码表对有效样本统计。开发板 J12 的脚位和日志格式见 [Rider CoreTemp 模块说明](./apps/rider_core_temp/README.md)，公式、参数和验证记录见 [单 M601 温度算法研究与验证](./doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md)，协议字段见 [CORE2 BLE 协议说明](./doc/ICXL-CoreTemp-Ride/CORE2_BLE_协议说明.md)。
+进入 `apps/rider_core_temp` 后，可使用 `make ac632n_rider_core_temp` 构建独立固件。应用只启用 BLE 外设角色，设备名固定为 `ICXL-RTemp`；PB7 由 `modules/temp/m601_1wire.c` 独占，`modules/temp/rider_temp_filter.c` 负责滤波和佩戴状态，`modules/bt/core_temp_gatt.c` 编排 GATT、`modules/bt/rider_temp_codec.c` 负责可测试的温度字节编码，J12 LED/按键诊断由 `modules/diag/rider_board_diag.c` 提供。温度链路明确保留 Sensor、Trusted Skin、Experimental Core 三条时间线：`30~45°C` 是宽泛佩戴保护窗，5 个样本只填满中值窗口，连续约 30 秒有效接触后才建立可信皮温；`32~40°C` 仅作为典型胸部贴肤和脱落恢复证据，不能提前跳过 30 秒门控。可信后，自定义 CORE 约 1 Hz 稳定上报 Skin，核心字段先保持 `0x7FFF`；Core V1 再积累约 5 分钟可信皮温历史，随后约 1 Hz 更新实验性核心候选，HTS 约每 10 秒上报一次 Core。可信皮温建立后若滤波值持续低于 `31.50°C` 约 60 秒，也会判为离体并清空当前 episode；重新贴肤须回到脱落前峰值附近并重新完成可信与模型预热。通用头文件默认使用 `SHADOW`；当前 AC632N 板级显式使用 `EXPERIMENTAL`，用于把可追溯但尚未验证的核心候选送到码表导出，不能宣称为医疗或已验证核心体温。完成完整骑行 Session 留出标定后才可切换 `STRICT`。平均温度仍由码表对有效样本统计。开发板 J12 的脚位和日志格式见 [Rider CoreTemp 模块说明](./apps/rider_core_temp/README.md)，公式、参数和验证记录见 [单 M601 温度算法研究与验证](./doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md)，协议字段见 [CORE2 BLE 协议说明](./doc/ICXL-CoreTemp-Ride/CORE2_BLE_协议说明.md)。
 
 蓝牙官方认证
 -------------

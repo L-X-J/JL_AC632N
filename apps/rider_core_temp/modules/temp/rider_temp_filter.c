@@ -23,8 +23,10 @@ typedef struct {
     uint8_t detach_candidate_samples;
     uint8_t detach_latched;
     uint8_t detach_recovery_samples;
+    uint8_t off_body_samples;
     int16_t filtered_temperature_centi;
     int16_t previous_filtered_centi;
+    int16_t contact_peak_centi;
     int16_t detach_peak_centi;
 } rider_temperature_filter_state_t;
 
@@ -51,7 +53,9 @@ static void rider_filter_reset_history(void)
     rider_filter.detach_candidate_samples = 0;
     rider_filter.detach_latched = 0;
     rider_filter.detach_recovery_samples = 0;
+    rider_filter.off_body_samples = 0;
     rider_filter.detach_peak_centi = 0;
+    rider_filter.contact_peak_centi = 0;
 }
 
 /** Fill an unavailable filter result without inventing a temperature value. */
@@ -180,6 +184,43 @@ static void rider_filter_update_detach_candidate(int16_t slope)
     }
 }
 
+/** Confirm a stable low-temperature dwell after trust as off-body evidence.
+ *
+ * The 30~45 C startup window is intentionally broad because the sensor can
+ * begin cold. After a trusted episode exists, however, a filtered value at or
+ * below 31.50 C held for about one minute is a practical detach signal for this
+ * single-site probe. It is latched through the same reattach path as a rapid
+ * cooling event, so one low sample cannot revoke a valid wear episode. */
+static void rider_filter_update_off_body_dwell(void)
+{
+    if (!rider_filter.skin_trusted_latched ||
+        rider_filter.filtered_temperature_centi >
+            RIDER_TEMP_FILTER_OFF_BODY_MAX_CENTI) {
+        rider_filter.off_body_samples = 0;
+        return;
+    }
+
+    if (rider_filter.off_body_samples < 0xff) {
+        rider_filter.off_body_samples++;
+    }
+    if (rider_filter.off_body_samples >=
+        RIDER_TEMP_FILTER_OFF_BODY_CONFIRM_SAMPLES) {
+        rider_filter.detach_latched = 1;
+        rider_filter.detach_recovery_samples = 0;
+        rider_filter.detach_peak_centi =
+            rider_filter.contact_peak_centi
+                ? rider_filter.contact_peak_centi
+                : rider_filter.filtered_temperature_centi;
+    }
+}
+
+/** Return whether either cooling detector is withholding trusted timelines. */
+static uint8_t rider_filter_detach_candidate_active(void)
+{
+    return rider_filter.detach_candidate_samples ||
+           rider_filter.off_body_samples;
+}
+
 /** Reset the filter and start a new temporal contact episode. */
 void rider_temp_filter_init(void)
 {
@@ -301,6 +342,7 @@ void rider_temp_filter_consume(const rider_temperature_sample_t *sample,
     }
 
     rider_filter_update_detach_candidate(slope);
+    rider_filter_update_off_body_dwell();
     if (rider_filter.detach_latched) {
         rider_filter_set_invalid(output, RIDER_TEMP_STATUS_NOT_WORN,
                                  RIDER_TEMP_STATE_DETACH_SUSPECTED);
@@ -324,6 +366,15 @@ void rider_temp_filter_consume(const rider_temperature_sample_t *sample,
          * 32~40 C band is deliberately not a shortcut: five plausible values
          * fill the median filter but cannot prove durable skin contact. */
         rider_filter.skin_trusted_latched = 1;
+        rider_filter.contact_peak_centi =
+            rider_filter.filtered_temperature_centi;
+    } else if (rider_filter.skin_trusted_latched &&
+               rider_filter.filtered_temperature_centi >
+                   rider_filter.contact_peak_centi) {
+        /* Keep the pre-drop trusted peak so slow detach recovery cannot be
+         * satisfied by an ambient plateau that merely re-enters 32~40 C. */
+        rider_filter.contact_peak_centi =
+            rider_filter.filtered_temperature_centi;
     }
     output->sequence = sample->sequence;
     output->filtered_temperature_centi = rider_filter.filtered_temperature_centi;
@@ -332,12 +383,12 @@ void rider_temp_filter_consume(const rider_temperature_sample_t *sample,
     output->typical_samples = rider_filter.typical_samples;
     output->valid = 1;
     output->skin_trusted = rider_filter.skin_trusted_latched &&
-                           rider_filter.detach_candidate_samples == 0;
+                           !rider_filter_detach_candidate_active();
     /* A possible detach remains visible as a filtered contact diagnostic, but
      * it leaves both trusted-skin and core timelines until recovery. */
     output->core_input_valid = output->skin_trusted;
     output->status = RIDER_TEMP_STATUS_OK;
-    if (rider_filter.detach_candidate_samples) {
+    if (rider_filter_detach_candidate_active()) {
         output->state = RIDER_TEMP_STATE_DETACH_SUSPECTED;
     } else if (rider_filter.skin_trusted_latched) {
         output->state = RIDER_TEMP_STATE_SKIN_TRUSTED;

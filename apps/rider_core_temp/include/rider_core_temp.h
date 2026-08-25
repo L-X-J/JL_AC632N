@@ -110,6 +110,10 @@ enum rider_temperature_freshness {
 #define RIDER_TEMP_FILTER_DETACH_MIN_DROP_CENTI 50
 #define RIDER_TEMP_FILTER_DETACH_RECOVERY_SLOPE_CPM 30
 #define RIDER_TEMP_FILTER_REATTACH_MARGIN_CENTI 75
+/* Once a wear episode is trusted, a long low-temperature dwell is stronger
+ * evidence of an off-body probe than the broad startup protection window. */
+#define RIDER_TEMP_FILTER_OFF_BODY_MAX_CENTI 3150
+#define RIDER_TEMP_FILTER_OFF_BODY_CONFIRM_SAMPLES 60
 
 /* Publication is intentionally separate from model validity. EXPERIMENTAL
  * publishes the unverified candidate so real rides can be recorded; STRICT

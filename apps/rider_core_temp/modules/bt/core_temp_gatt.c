@@ -7,6 +7,10 @@
 #include "le_common.h"
 #include "btstack/le/att.h"
 #include "asm/adc_api.h"
+#if RCSP_BTMATE_EN
+#include "rcsp_bluetooth.h"
+#include "JL_rcsp_api.h"
+#endif
 
 #define LOG_TAG_CONST       GATT_SERVER
 #define LOG_TAG             "[RIDER_GATT]"
@@ -23,6 +27,7 @@
 #define RIDER_EXTERNAL_HR_TIMEOUT       15
 #define RIDER_CORE_FRAME_MAX            RIDER_TEMP_CODEC_CORE_FRAME_MAX
 #define RIDER_STANDARD_TEMPERATURE_FRAME_SIZE RIDER_TEMP_CODEC_STANDARD_FRAME_SIZE
+#define RIDER_DEBUG_FRAME_MAX           RIDER_TEMP_CODEC_DEBUG_FRAME_SIZE
 
 static u8 rider_adv_data[RIDER_ADV_PACKET_MAX];
 static u8 rider_scan_rsp_data[RIDER_ADV_PACKET_MAX];
@@ -40,6 +45,7 @@ static u8 rider_standard_temperature_pending;
 static u8 rider_battery_pending;
 static u8 rider_last_battery_level;
 static u8 rider_battery_level_valid;
+static u16 rider_debug_timer_id;
 
 /** Return whether the custom CORE frame can carry trusted skin.
  * Core readiness remains an independent field-level decision below. */
@@ -77,6 +83,15 @@ static u8 rider_core_frame_value_available(
 #else
     return 0;
 #endif
+}
+
+/** Stop the collector cadence before connection or GATT state is cleared. */
+static void rider_debug_stop_timer(void)
+{
+    if (rider_debug_timer_id) {
+        sys_timer_del(rider_debug_timer_id);
+        rider_debug_timer_id = 0;
+    }
 }
 
 /** Select the mandatory CORE field while preserving the shadow sentinel. */
@@ -368,6 +383,68 @@ static u16 rider_make_core_frame(u8 *frame, u16 frame_size,
 {
     return rider_encode_core_temperature_frame(
         frame, frame_size, rider_core_frame_value(snapshot), snapshot);
+}
+
+/** Encode the fixed-width collector snapshot with the active publication gate. */
+static u16 rider_make_debug_frame(u8 *frame, u16 frame_size,
+                                  const rider_temperature_snapshot_t *snapshot)
+{
+    return rider_encode_debug_snapshot_frame(
+        frame, frame_size, snapshot, rider_core_frame_value(snapshot));
+}
+
+/** Send one latest-snapshot debug notification; busy ATT windows are retried. */
+static int rider_send_debug_snapshot_now(void)
+{
+    u8 frame[RIDER_DEBUG_FRAME_MAX];
+    u16 frame_len;
+    rider_temperature_snapshot_t snapshot;
+
+    if (!rider_connection_handle) {
+        return GATT_CMD_PARAM_ERROR;
+    }
+    rider_estimator_copy_snapshot(&snapshot);
+    frame_len = rider_make_debug_frame(frame, sizeof(frame), &snapshot);
+    if (frame_len != RIDER_DEBUG_FRAME_MAX) {
+        return GATT_CMD_PARAM_ERROR;
+    }
+    log_info("Rider DEBUG notify: len=%u seq=%u handle=%04x\n", frame_len,
+             (unsigned)snapshot.sequence, RIDER_ATT_DEBUG_DATA_VALUE_HANDLE);
+    put_buf(frame, frame_len);
+    return rider_send_subscribed_value(
+        rider_connection_handle, RIDER_ATT_DEBUG_DATA_VALUE_HANDLE,
+        RIDER_ATT_DEBUG_DATA_CCC_HANDLE,
+        GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION,
+        frame, frame_len);
+}
+
+/** Maintain the requested 200 ms cadence without coupling it to sensor reads. */
+static void rider_debug_notify_timer(void *priv)
+{
+    u16 ccc;
+
+    (void)priv;
+    if (!rider_connection_handle) {
+        rider_debug_stop_timer();
+        return;
+    }
+    ccc = ble_gatt_server_characteristic_ccc_get(
+        rider_connection_handle, RIDER_ATT_DEBUG_DATA_CCC_HANDLE);
+    if (!(ccc & GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION)) {
+        rider_debug_stop_timer();
+        return;
+    }
+    (void)rider_send_debug_snapshot_now();
+}
+
+/** Start one timer per connection after the debug CCCD is enabled. */
+static void rider_debug_start_timer(void)
+{
+    if (!rider_debug_timer_id && rider_connection_handle) {
+        rider_debug_timer_id = sys_timer_add(NULL, rider_debug_notify_timer, 200);
+        log_info("Rider DEBUG cadence started: 200 ms timer=%u\n",
+                 rider_debug_timer_id);
+    }
 }
 
 /** Send the custom CORE value once its notification CCCD and ATT queue allow it. */
@@ -674,7 +751,7 @@ static uint16_t rider_att_read_callback(hci_con_handle_t connection_handle,
                                         uint8_t *buffer,
                                         uint16_t buffer_size)
 {
-    u8 value[32];
+    u8 value[RIDER_DEBUG_FRAME_MAX];
     rider_temperature_snapshot_t snapshot;
     u16 value_len;
 
@@ -717,6 +794,13 @@ static uint16_t rider_att_read_callback(hci_con_handle_t connection_handle,
         log_info("Rider ATT HTS read payload: len=%u\n", value_len);
         put_buf(value, value_len);
         return rider_copy_value(value, value_len, offset, buffer, buffer_size);
+    case RIDER_ATT_DEBUG_DATA_VALUE_HANDLE:
+        rider_estimator_copy_snapshot(&snapshot);
+        value_len = rider_make_debug_frame(value, sizeof(value), &snapshot);
+        log_info("Rider ATT DEBUG read payload: len=%u seq=%u\n", value_len,
+                 (unsigned)snapshot.sequence);
+        put_buf(value, value_len);
+        return rider_copy_value(value, value_len, offset, buffer, buffer_size);
     case RIDER_ATT_TEMPERATURE_TYPE_VALUE_HANDLE:
         value[0] = 0x02;
         return rider_copy_value(value, 1, offset, buffer, buffer_size);
@@ -740,6 +824,10 @@ static uint16_t rider_att_read_callback(hci_con_handle_t connection_handle,
     case RIDER_ATT_CORE_CONTROL_POINT_CCC_HANDLE:
     case RIDER_ATT_STANDARD_TEMPERATURE_CCC_HANDLE:
     case RIDER_ATT_BATTERY_CCC_HANDLE:
+    case RIDER_ATT_DEBUG_DATA_CCC_HANDLE:
+#if RCSP_BTMATE_EN
+    case RIDER_ATT_RCSP_NOTIFY_CCC_HANDLE:
+#endif
         return rider_copy_ccc(connection_handle, att_handle, offset, buffer, buffer_size);
     default:
         return 0;
@@ -774,6 +862,10 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
                              GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_INDICATION);
     case RIDER_ATT_CORE_TEMPERATURE_CCC_HANDLE:
     case RIDER_ATT_BATTERY_CCC_HANDLE:
+    case RIDER_ATT_DEBUG_DATA_CCC_HANDLE:
+#if RCSP_BTMATE_EN
+    case RIDER_ATT_RCSP_NOTIFY_CCC_HANDLE:
+#endif
         if (!buffer || buffer_size != 2) {
             return GATT_CMD_PARAM_ERROR;
         }
@@ -792,6 +884,26 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
                 rider_core_temperature_pending =
                     (ccc_config & GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION) != 0;
             }
+            if (att_handle == RIDER_ATT_DEBUG_DATA_CCC_HANDLE &&
+                result == GATT_OP_RET_SUCESS) {
+                if (ccc_config & GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION) {
+                    rider_debug_start_timer();
+                } else {
+                    rider_debug_stop_timer();
+                }
+            }
+#if RCSP_BTMATE_EN
+            if (att_handle == RIDER_ATT_RCSP_NOTIFY_CCC_HANDLE &&
+                result == GATT_OP_RET_SUCESS && ccc_config) {
+                ble_gatt_server_set_update_send(
+                    connection_handle, RIDER_ATT_RCSP_NOTIFY_VALUE_HANDLE,
+                    ATT_OP_AUTO_READ_CCC);
+                set_rcsp_conn_handle(connection_handle);
+#if (defined(BT_CONNECTION_VERIFY) && (0 == BT_CONNECTION_VERIFY))
+                JL_rcsp_auth_reset();
+#endif
+            }
+#endif
             if (result == GATT_OP_RET_SUCESS && ccc_config) {
                 rider_request_can_send_now(connection_handle);
             }
@@ -837,6 +949,14 @@ static int rider_att_write_callback(hci_con_handle_t connection_handle,
             }
             return result;
         }
+#if RCSP_BTMATE_EN
+    case RIDER_ATT_RCSP_WRITE_VALUE_HANDLE:
+        if (!buffer || !buffer_size) {
+            return GATT_CMD_PARAM_ERROR;
+        }
+        ble_gatt_server_receive_update_data(NULL, buffer, buffer_size);
+        return GATT_OP_RET_SUCESS;
+#endif
     default:
         return GATT_CMD_PARAM_ERROR;
     }
@@ -861,6 +981,7 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
             rider_standard_temperature_pending = 0;
             rider_battery_pending = 0;
             rider_battery_level_valid = 0;
+            rider_debug_stop_timer();
             rider_estimator_set_external_heart_rate(0, 0);
         }
         break;
@@ -894,6 +1015,7 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
                 rider_standard_temperature_pending = 0;
                 rider_battery_pending = 0;
                 rider_battery_level_valid = 0;
+                rider_debug_stop_timer();
                 rider_estimator_set_external_heart_rate(0, 0);
 
                 /* The common GATT layer re-enables advertising after this
@@ -921,6 +1043,7 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
                 rider_standard_temperature_pending = 0;
                 rider_battery_pending = 0;
                 rider_battery_level_valid = 0;
+                rider_debug_stop_timer();
                 rider_estimator_set_external_heart_rate(0, 0);
             }
         }
@@ -980,6 +1103,7 @@ void rider_core_temp_gatt_init(void)
     rider_standard_temperature_pending = 0;
     rider_battery_pending = 0;
     rider_battery_level_valid = 0;
+    rider_debug_stop_timer();
     rider_last_adv_valid = 0;
     rider_estimator_copy_snapshot(&snapshot);
     ble_comm_set_config_name(RIDER_CORE_TEMP_NAME, 0);
@@ -999,6 +1123,7 @@ void rider_core_temp_gatt_exit(void)
     rider_standard_temperature_pending = 0;
     rider_battery_pending = 0;
     rider_battery_level_valid = 0;
+    rider_debug_stop_timer();
     rider_connection_handle = 0;
     if (rider_gatt_ready) {
         ble_comm_exit();

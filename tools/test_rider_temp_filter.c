@@ -179,6 +179,76 @@ static void test_fast_cooling_confirms_detach_and_rewarms(void)
     assert(output.state == RIDER_TEMP_STATE_SKIN_TRUSTED);
 }
 
+/** A trusted probe held near 30.3 C must not remain publishable forever. */
+static void test_low_temperature_dwell_confirms_off_body(void)
+{
+    rider_temperature_filter_output_t output;
+    uint32_t low_samples = 0;
+    uint32_t sequence;
+    uint32_t index;
+
+    rider_temp_filter_init();
+    for (sequence = 1; sequence <= RIDER_TEMP_FILTER_TRUSTED_SAMPLES;
+         ++sequence) {
+        output = feed(sequence, 3600, 1, RIDER_TEMP_STATUS_OK);
+    }
+    assert(output.skin_trusted);
+
+    /* Descend over several minutes with a filtered slope below the fast gate;
+     * this models a probe cooling toward the reported 30.3 C ambient plateau. */
+    for (; sequence <= RIDER_TEMP_FILTER_TRUSTED_SAMPLES + 285; ++sequence) {
+        int16_t temperature = (int16_t)(3600 -
+            ((sequence - RIDER_TEMP_FILTER_TRUSTED_SAMPLES) * 570) / 285);
+
+        output = feed(sequence, temperature, 1, RIDER_TEMP_STATUS_OK);
+        assert(output.valid);
+        assert(output.slope_centi_per_min > RIDER_TEMP_FILTER_DETACH_SLOPE_CPM);
+        if (output.filtered_temperature_centi <=
+            RIDER_TEMP_FILTER_OFF_BODY_MAX_CENTI) {
+            low_samples++;
+            assert(low_samples < RIDER_TEMP_FILTER_OFF_BODY_CONFIRM_SAMPLES);
+            assert(!output.skin_trusted);
+            assert(output.state == RIDER_TEMP_STATE_DETACH_SUSPECTED);
+        }
+    }
+
+    assert(low_samples > 0);
+    assert(output.filtered_temperature_centi <= 3100);
+    assert(output.state == RIDER_TEMP_STATE_DETACH_SUSPECTED);
+
+    /* The low dwell began during the descent, so only the remaining samples
+     * are needed to reach the explicit 60-sample confirmation boundary. */
+    for (index = 0; output.valid && index <
+         RIDER_TEMP_FILTER_OFF_BODY_CONFIRM_SAMPLES; ++index) {
+        output = feed(sequence++, 3030, 1, RIDER_TEMP_STATUS_OK);
+        if (output.valid) {
+            assert(output.slope_centi_per_min >
+                   RIDER_TEMP_FILTER_DETACH_SLOPE_CPM);
+            low_samples++;
+            assert(low_samples < RIDER_TEMP_FILTER_OFF_BODY_CONFIRM_SAMPLES);
+            assert(!output.skin_trusted);
+            assert(output.state == RIDER_TEMP_STATE_DETACH_SUSPECTED);
+        }
+    }
+    assert(!output.valid);
+    assert(output.status == RIDER_TEMP_STATUS_NOT_WORN);
+    assert(output.state == RIDER_TEMP_STATE_DETACH_SUSPECTED);
+    assert(output.filtered_temperature_centi == 0x7fff);
+
+    /* A 32 C ambient-like plateau is not enough to reattach to the previous
+     * 36 C trusted episode; the existing peak-margin gate remains active. */
+    for (index = 0; index < RIDER_TEMP_FILTER_TYPICAL_SAMPLES; ++index) {
+        output = feed(sequence++, 3200, 1, RIDER_TEMP_STATUS_OK);
+        assert(!output.valid);
+        assert(output.state == RIDER_TEMP_STATE_DETACH_SUSPECTED);
+    }
+    for (index = 0; index < RIDER_TEMP_FILTER_TYPICAL_SAMPLES; ++index) {
+        output = feed(sequence++, 3600, 1, RIDER_TEMP_STATUS_OK);
+    }
+    assert(!output.valid);
+    assert(output.state == RIDER_TEMP_STATE_CONTACT_SETTLING);
+}
+
 /** Missing, duplicate, and CRC-invalid samples clear temporal qualification. */
 static void test_gap_crc_and_duplicate_force_requalification(void)
 {
@@ -216,6 +286,7 @@ int main(void)
     test_typical_band_is_not_a_latched_validity_range();
     test_small_cooling_trend_is_preserved();
     test_fast_cooling_confirms_detach_and_rewarms();
+    test_low_temperature_dwell_confirms_off_body();
     test_gap_crc_and_duplicate_force_requalification();
     puts("rider_temp_filter host tests: OK");
     return 0;

@@ -152,6 +152,10 @@ c_SRC_FILES := \
 	../../../../apps/rider_core_temp/modules/bt/core_temp_gatt.c \
 	../../../../apps/rider_core_temp/modules/bt/rider_temp_codec.c \
 	../../../../apps/rider_core_temp/modules/bt/rider_ble_lifecycle.c \
+	../../../../apps/common/third_party_profile/jieli/JL_rcsp/bt_trans_data/rcsp_hid_inter.c \
+	../../../../apps/common/third_party_profile/jieli/JL_rcsp/rcsp_bluetooth.c \
+	../../../../apps/common/third_party_profile/jieli/JL_rcsp/rcsp_updata/rcsp_ch_loader_download.c \
+	../../../../apps/common/third_party_profile/jieli/JL_rcsp/rcsp_updata/rcsp_user_update.c \
 	../../../../apps/rider_core_temp/modules/diag/rider_board_diag.c \
 	../../../../apps/rider_core_temp/modules/main/rider_core_temp_app.c \
 	../../../../apps/rider_core_temp/modules/system/rider_user_cfg.c \

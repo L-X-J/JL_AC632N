@@ -82,10 +82,47 @@ profile 使用 `include/core_temp_profile.h` 中的静态 ATT 数据，所有多
 | Device Information / Manufacturer Name | `0x180A` / `0x2A29` | Read | `0x001F` | - |
 | Device Information / Model Number | `0x180A` / `0x2A24` | Read | `0x0021` | - |
 | Device Information / Firmware Revision | `0x180A` / `0x2A26` | Read | `0x0023` | - |
+| Rider Debug Snapshot Service | `00002110-5B1E-4347-B07C-97B514DAE121` | service | - | - |
+| Rider Debug Snapshot | `00002111-5B1E-4347-B07C-97B514DAE121` | Read, Notify | `0x0026` | `0x0027` |
+
+### 调试快照帧（0x2111）
+
+订阅 `0x0027` 后，固件启动独立的 200 ms 定时器，向 `0x0026` 发送固定 41 字节帧；退订、断开或 GATT 退出会停止定时器。200 ms 是最新快照的发送节拍，不会把 M601 的 1 秒采样任务改成 5 Hz，因此同一秒内可能出现相同 `sequence`。小端字段和偏移如下：
+
+| 偏移 | 长度 | 字段 |
+|---:|---:|---|
+| 0 | 1 | protocol_version，当前为 `1` |
+| 1 | 1 | flags：Sensor/Contact/Skin/CoreCandidate/PublishedCore/HR/Verified/Stale 位 |
+| 2 | 4 | sequence，uint32 LE |
+| 6 | 2 | sensor_temperature_centi，int16 LE |
+| 8 | 2 | contact_temperature_centi，int16 LE |
+| 10 | 2 | skin_temperature_centi，int16 LE |
+| 12 | 2 | core_estimate_centi，int16 LE |
+| 14 | 2 | published_core_centi，int16 LE |
+| 16 | 2 | slope_centi_per_min，int16 LE |
+| 18 | 2 | skin_baseline_centi，int16 LE |
+| 20 | 2 | skin_delta_1m_centi，int16 LE |
+| 22 | 2 | skin_delta_5m_centi，int16 LE |
+| 24 | 2 | heart_rate_delta_1m，int16 LE |
+| 26 | 2 | core_history_seconds，uint16 LE |
+| 28 | 2 | contact_samples，uint16 LE |
+| 30 | 1 | typical_samples |
+| 31 | 1 | heart_rate |
+| 32..40 | 9 | quality、sensor_status、temperature_state、core_state、freshness、confidence、model_mode、model_version、heart_rate_used |
+
+温度字段当前值无效时统一为 `0x7FFF`；`core_estimate_centi` 保留算法候选，`published_core_centi` 由板级 `RIDER_CORE_TEMP_PUBLISH_MODE` 决定，便于记录实验值而不污染兼容 CORE 特征。服务 UUID 不放进现有 31 字节广播，Central 应按设备名连接后按 UUID 发现服务。
+
+## 微信小程序调试台
+
+小程序位于 [`wechat_miniprogram/rider_core_temp_debug`](../../wechat_miniprogram/rider_core_temp_debug/README.md)，首屏提供扫描 `ICXL-RTemp`、按 UUID 连接并订阅 `0x2111`、实时查看 Sensor/Contact/Skin/Core、暂停/清空记录、原始十六进制和 CSV 导出。它只解码协议字段，不重新实现温度滤波或 Core 算法；每条记录保留 sequence、模型版本、质量、状态、置信度和原始帧。
+
+### OTA 边界
+
+当前板级 `board_ac632n_rider_global_build_cfg.h` 将 `CONFIG_APP_OTA_ENABLE` 和双备份都设为 `0`，默认 profile 不包含 RCSP `AE00/AE01/AE02` 服务，因此小程序的 OTA 区域只做通道探测和认证边界提示，不会发送固件。若要启用升级，需在有硬件回滚方案的分支打开该宏并验证 RCSP 认证、文件信息、分块 ACK、校验和重启流程；Makefile 已预留 RCSP 源文件和 `rcsp_task`，profile 与 GATT 写入转发也只在 `RCSP_BTMATE_EN` 打开时编译。
 
 本轮实验固件的 Firmware Revision 为 `0.2.0`，Core 模型版本为 `1`。每次人体/骑行实验都应把设备地址、固件版本、模型版本和标定 header 的来源与码表导出文件一起登记；仅凭温度列无法判断数据使用了哪套门控和系数。
 
-CORE 温度通知的 Core 和 Skin 都是有符号百分之一摄氏度。当前实现把三个阶段分开：原始 Sensor 样本先通过 CRC、物理范围和 `30~45°C` 佩戴保护窗；5 点中值和 EWMA 形成接触温度；连续约 30 秒有效接触后，才把该固定胸带位置的滤波值标记为 Trusted Skin。`32~40°C` 是典型贴肤证据和重新佩戴辅助条件，不是可信皮温捷径，也不是人体核心温度范围。可信皮温建立后，自定义 CORE 约 1 Hz 附带 Skin，Core 在模型预热阶段明确为 `0x7FFF`。
+CORE 温度通知的 Core 和 Skin 都是有符号百分之一摄氏度。当前实现把三个阶段分开：原始 Sensor 样本先通过 CRC、物理范围和 `30~45°C` 佩戴保护窗；5 点中值和 EWMA 形成接触温度；连续约 30 秒有效接触后，才把该固定胸带位置的滤波值标记为 Trusted Skin。`32~40°C` 是典型贴肤证据和重新佩戴辅助条件，不是可信皮温捷径，也不是人体核心温度范围。可信皮温建立后，若滤波值持续低于 `31.50°C` 约 60 秒，则锁存为脱落并清空 Skin/Core 资格，防止离体后稳定在 `30.3°C` 一类环境温度时继续上报旧值；重新回到典型贴肤温度后仍须重新完成预热。可信皮温建立后，自定义 CORE 约 1 Hz 附带 Skin，Core 在模型预热阶段明确为 `0x7FFF`。
 
 当前 AC632N 板级显式选择 `EXPERIMENTAL`。Core V1 保存 5 秒间隔、覆盖约 5 分钟的可信皮温历史，并使用本次佩戴基线、1/5 分钟皮温变化和可选外部心率计算 Q8 实验候选；约 5 分钟历史满足后才进入独立的 `READY` 状态，随后按采样节拍更新 Core。输出超出 `35~42°C` 时整帧 Core 判为无效而不是钳制到边界，每秒变化另受 `0.25°C` 保护。滤波皮温快速下降时，Trusted Skin 和 Core 立即暂停；确认脱落后必须连续 5 个 `32~40°C` 样本且回到脱落前峰值 `0.75°C` 范围内，才开始新的 30 秒可信皮温与 5 分钟 Core 预热。标准 HTS 和广播只承载 Core，不承载 Skin；完成完整骑行 Session 留出验证后才可切换 `STRICT`，`CONTACT_PROXY` 只保留用于旧版本对比。
 
@@ -115,7 +152,7 @@ PB7 (`IO_PORTB_07`) 由 M601 1-Wire 总线独占：
 
 `-40.00°C` 到 `125.00°C` 是 M601 的电气/物理读数范围，不是佩戴判定。应用估算层另用默认 `30.00°C` 到 `45.00°C` 的产品区间过滤环境读数；例如脱离人体后常见的 `23.00°C` 会被标记为 `RIDER_TEMP_STATUS_NOT_WORN`（status=4），不会成为有效核心温度。该区间定义在 `include/rider_core_temp.h`，量产时可按结构和实测校准。
 
-无设备、CRC 错误、物理范围错误、未佩戴或连续约 3 秒没有新序号的样本都会形成无效快照，清空当前皮温/Core episode；ATT Read 返回协议规定的无效哨兵值。`CONTACT_SETTLING` 期间只保留内部接触诊断，不发送 Skin Notification；约 30 秒后进入 `SKIN_TRUSTED`，自定义 CORE 才开始发送可信 Skin。Core V1 继续预热约 5 分钟，此时自定义帧的 Core 为 `0x7FFF`，HTS 和温度广播仍等待 Core 发布门控；进入 `READY` 后，板级 `EXPERIMENTAL` 把 Skin 与 Core 候选同时送入自定义 CORE，并把 Core 候选送入 HTS/广播。这样码表不会把断报、未确认接触或 `23°C` 当成低温样本；Core 必须保留“实验值”语义，平均值仍由码表只对相应有效历史样本统计。
+无设备、CRC 错误、物理范围错误、低温持续脱落、未佩戴或连续约 3 秒没有新序号的样本都会形成无效快照，清空当前皮温/Core episode；ATT Read 返回协议规定的无效哨兵值。`CONTACT_SETTLING` 期间只保留内部接触诊断，不发送 Skin Notification；约 30 秒后进入 `SKIN_TRUSTED`，自定义 CORE 才开始发送可信 Skin。Core V1 继续预热约 5 分钟，此时自定义帧的 Core 为 `0x7FFF`，HTS 和温度广播仍等待 Core 发布门控；进入 `READY` 后，板级 `EXPERIMENTAL` 把 Skin 与 Core 候选同时送入自定义 CORE，并把 Core 候选送入 HTS/广播。这样码表不会把断报、未确认接触、持续 `30.3°C` 或 `23°C` 当成低温样本；Core 必须保留“实验值”语义，平均值仍由码表只对相应有效历史样本统计。
 
 ## 串口诊断日志
 

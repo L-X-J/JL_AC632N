@@ -28,6 +28,9 @@ const struct task_info task_info_table[] = {
     {"systimer", 7, 0, 128, 0},
     {"update", 1, 0, 512, 0},
     {"dw_update", 2, 0, 256, 128},
+#if RCSP_BTMATE_EN
+    {"rcsp_task", 2, 0, 640, 0},
+#endif
     {0, 0},
 };
 

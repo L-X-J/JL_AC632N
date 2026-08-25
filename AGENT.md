@@ -14,6 +14,7 @@ Codex 在任何代码生成前必须读取 AGENT.md 并严格遵守其中的架�
 - **Library / SDK**：`include_lib`，提供 SDK、驱动和协议栈的公开头文件及预编译库接口。
 - **Infrastructure / Tools**：根 `Makefile`、板级 `Makefile` 和 `tools`，负责构建、预处理、链接和下载。
 - **IDE Integration**：根 `CMakeLists.txt` 和 `CMakePresets.json` 只建立 CLion 的代码模型，并调用现有 Makefile；不得承载固件业务逻辑。
+- **调试工具 / 小程序**：`wechat_miniprogram/rider_core_temp_debug` 只负责 BLE Central、调试帧解码、记录导出和 OTA 适配，不反向依赖固件源码。
 
 ## 模块职责边界
 
@@ -41,7 +42,7 @@ Codex 在任何代码生成前必须读取 AGENT.md 并严格遵守其中的架�
 4. 涉及目录、分层或依赖变化时，必须同步本文件、根 README 和相关模块说明。
 5. 每次扩展都应确认依赖方向为应用 → 公共组件 → CPU/SDK，禁止反向依赖。
 
-Rider CoreTemp 的产品协议、温度算法、PB7 传感器适配和 AC632N 板载诊断必须留在 `apps/rider_core_temp`；不得把产品 UUID、温度状态、M601 时序或 J12 LED/按键逻辑移入 `apps/common` 或 `cpu/bd19`。其中 `modules/temp` 按采集、滤波/佩戴状态和估算职责拆分，`modules/bt/core_temp_gatt.c` 负责 GATT 生命周期/通知编排，`modules/bt/rider_temp_codec.c` 只承载可主机验证的纯字节编码，`modules/diag` 只能读取现有 BLE/温度接口并驱动板级配置声明的 GPIO，不得复制协议解析或温度换算。
+Rider CoreTemp 的产品协议、温度算法、PB7 传感器适配和 AC632N 板载诊断必须留在 `apps/rider_core_temp`；不得把产品 UUID、温度状态、M601 时序或 J12 LED/按键逻辑移入 `apps/common` 或 `cpu/bd19`。其中 `modules/temp` 按采集、滤波/佩戴状态和估算职责拆分，`modules/bt/core_temp_gatt.c` 负责 GATT 生命周期/通知编排，`modules/bt/rider_temp_codec.c` 只承载可主机验证的纯字节编码，`modules/diag` 只能读取现有 BLE/温度接口并驱动板级配置声明的 GPIO，不得复制协议解析或温度换算。调试工具只消费公开 UUID 和帧格式；不能在小程序中复制固件算法或写入未经确认的业务状态。
 
 AC632N 开发板的 J12 是独立的 LED/按键接口，默认跳线映射由 `apps/rider_core_temp/board/bd19/board_ac632n_rider_cfg.h` 声明；PB7 永远归 M601 1-Wire，PA0 永远归 UART0 TX。修改 J12 映射时必须同步模块 README，并确认低功耗 GPIO 清理不会释放诊断端口。
 
