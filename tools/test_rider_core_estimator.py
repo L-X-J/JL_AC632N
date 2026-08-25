@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FILTER_SOURCE = ROOT / "apps/rider_core_temp/modules/temp/rider_temp_filter.c"
 ESTIMATOR_SOURCE = ROOT / "apps/rider_core_temp/modules/temp/rider_core_estimator.c"
+CODEC_SOURCE = ROOT / "apps/rider_core_temp/modules/bt/rider_temp_codec.c"
 TEST_SOURCE = ROOT / "tools/test_rider_core_estimator.c"
 
 
@@ -56,6 +57,7 @@ class RiderCoreEstimatorTests(unittest.TestCase):
                 str(ROOT / "apps/rider_core_temp/include"),
                 str(FILTER_SOURCE),
                 str(ESTIMATOR_SOURCE),
+                str(CODEC_SOURCE),
                 str(TEST_SOURCE),
                 "-o",
                 str(executable),

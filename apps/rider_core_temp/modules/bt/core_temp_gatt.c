@@ -41,21 +41,20 @@ static u8 rider_battery_pending;
 static u8 rider_last_battery_level;
 static u8 rider_battery_level_valid;
 
-/** Return whether the custom CORE frame can carry a skin/contact value.
- * The wear gate and filter reject ambient/invalid samples; core publication
- * has a separate stability check below. */
+/** Return whether the custom CORE frame can carry trusted skin.
+ * Core readiness remains an independent field-level decision below. */
 static u8 rider_temperature_notification_allowed(
     const rider_temperature_snapshot_t *snapshot)
 {
     return snapshot && snapshot->skin_valid;
 }
 
-/** Require thermal stability before projecting contact temperature as core. */
+/** Keep the legacy contact proxy behind the new trusted-skin gate. */
 static u8 rider_contact_proxy_core_available(
     const rider_temperature_snapshot_t *snapshot)
 {
-    return snapshot && snapshot->contact_valid &&
-           snapshot->temperature_state == RIDER_TEMP_STATE_STABLE &&
+    return snapshot && snapshot->skin_valid &&
+           snapshot->temperature_state == RIDER_TEMP_STATE_SKIN_TRUSTED &&
            snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH;
 }
 
@@ -67,10 +66,11 @@ static u8 rider_core_frame_value_available(
         return 0;
     }
 #if RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_STRICT
-    return snapshot->core_estimate_valid && snapshot->core_estimate_verified;
+    return snapshot->core_estimate_valid && snapshot->core_estimate_verified &&
+           snapshot->core_state == RIDER_CORE_STATE_READY;
 #elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_EXPERIMENTAL
     return snapshot->core_estimate_valid &&
-           snapshot->temperature_state == RIDER_TEMP_STATE_STABLE &&
+           snapshot->core_state == RIDER_CORE_STATE_READY &&
            snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH;
 #elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
     return rider_contact_proxy_core_available(snapshot);
@@ -87,16 +87,17 @@ static int16_t rider_core_frame_value(
         return 0x7fff;
     }
 #if RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_STRICT
-    return snapshot->core_estimate_valid && snapshot->core_estimate_verified
+    return snapshot->core_estimate_valid && snapshot->core_estimate_verified &&
+                   snapshot->core_state == RIDER_CORE_STATE_READY
                ? snapshot->core_temperature_centi : 0x7fff;
 #elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_EXPERIMENTAL
     return snapshot->core_estimate_valid &&
-           snapshot->temperature_state == RIDER_TEMP_STATE_STABLE &&
+           snapshot->core_state == RIDER_CORE_STATE_READY &&
            snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH
                ? snapshot->core_temperature_centi : 0x7fff;
 #elif RIDER_CORE_TEMP_PUBLISH_MODE == RIDER_CORE_TEMP_PUBLISH_CONTACT_PROXY
     return rider_contact_proxy_core_available(snapshot)
-               ? snapshot->contact_temperature_centi : 0x7fff;
+               ? snapshot->skin_temperature_centi : 0x7fff;
 #else
     return 0x7fff;
 #endif
@@ -126,32 +127,40 @@ static int rider_event_packet_handler(int event, u8 *packet, u16 size, u8 *ext_p
 static void rider_log_temperature_snapshot(const char *stage,
                                            const rider_temperature_snapshot_t *snapshot)
 {
-    log_info("Rider temperature %s: seq=%u valid=%u status=%u state=%u "
-             "freshness=%u contact_centi=%d skin_centi=%d core_est_centi=%d "
-             "publish_mode=%u publish_core_centi=%d "
-             "contact_valid=%u skin_valid=%u core_input=%u core_valid=%u core_verified=%u "
-             "quality=%u confidence=%u\n",
+    log_info("Rider temperature %s: sensor_seq=%u skin_seq=%u core_seq=%u "
+             "valid=%u status=%u skin_state=%u core_state=%u freshness=%u "
+             "sensor_centi=%d skin_centi=%d core_est_centi=%d "
+             "publish_mode=%u publish_core_centi=%d skin_valid=%u "
+             "core_input=%u core_valid=%u core_verified=%u quality=%u "
+             "confidence=%u model=v%u/%u hr=%u hr_valid=%u hr_used=%u\n",
              stage ? stage : "unknown",
              snapshot ? (unsigned)snapshot->sequence : 0,
+             snapshot ? (unsigned)snapshot->skin_source_sequence : 0,
+             snapshot ? (unsigned)snapshot->core_source_sequence : 0,
              snapshot ? (unsigned)snapshot->valid : 0,
              snapshot ? (unsigned)snapshot->sensor_status : 0,
              snapshot ? (unsigned)snapshot->temperature_state : 0,
+             snapshot ? (unsigned)snapshot->core_state : 0,
              snapshot ? (unsigned)snapshot->data_freshness : 0,
-             snapshot && snapshot->contact_valid
-                 ? (int)snapshot->contact_temperature_centi : 32767,
+             snapshot && snapshot->sensor_valid
+                 ? (int)snapshot->sensor_temperature_centi : 32767,
              snapshot && snapshot->skin_valid
                  ? (int)snapshot->skin_temperature_centi : 32767,
              snapshot && snapshot->core_estimate_valid
                  ? (int)snapshot->core_temperature_centi : 32767,
              (unsigned)RIDER_CORE_TEMP_PUBLISH_MODE,
              (int)rider_core_frame_value(snapshot),
-             snapshot ? (unsigned)snapshot->contact_valid : 0,
              snapshot ? (unsigned)snapshot->skin_valid : 0,
              snapshot ? (unsigned)snapshot->core_input_valid : 0,
              snapshot ? (unsigned)snapshot->core_estimate_valid : 0,
              snapshot ? (unsigned)snapshot->core_estimate_verified : 0,
              snapshot ? (unsigned)snapshot->quality : RIDER_TEMP_QUALITY_NA,
-             snapshot ? (unsigned)snapshot->confidence : 0);
+             snapshot ? (unsigned)snapshot->confidence : 0,
+             snapshot ? (unsigned)snapshot->model_version : 0,
+             snapshot ? (unsigned)snapshot->model_mode : 0,
+             snapshot ? (unsigned)snapshot->heart_rate : 0,
+             snapshot ? (unsigned)snapshot->heart_rate_valid : 0,
+             snapshot ? (unsigned)snapshot->heart_rate_used : 0);
 }
 
 /** Log the ATT operation shape and a bounded payload prefix for hardware tests. */

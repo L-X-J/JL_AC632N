@@ -17,9 +17,9 @@ typedef struct {
     uint8_t have_sequence;
     uint8_t have_filtered;
     uint32_t last_sequence;
-    uint16_t valid_samples;
-    uint8_t normal_samples;
-    uint8_t stable_latched;
+    uint16_t contact_samples;
+    uint8_t typical_samples;
+    uint8_t skin_trusted_latched;
     uint8_t detach_candidate_samples;
     uint8_t detach_latched;
     uint8_t detach_recovery_samples;
@@ -36,9 +36,9 @@ static void rider_filter_clear_signal_history(void)
     memset(rider_filter.history, 0, sizeof(rider_filter.history));
     rider_filter.history_count = 0;
     rider_filter.history_write = 0;
-    rider_filter.valid_samples = 0;
-    rider_filter.normal_samples = 0;
-    rider_filter.stable_latched = 0;
+    rider_filter.contact_samples = 0;
+    rider_filter.typical_samples = 0;
+    rider_filter.skin_trusted_latched = 0;
     rider_filter.have_filtered = 0;
     rider_filter.filtered_temperature_centi = 0;
     rider_filter.previous_filtered_centi = 0;
@@ -123,11 +123,11 @@ static int16_t rider_filter_ewma(int16_t previous, int16_t input)
     return (int16_t)(previous + step);
 }
 
-/** Return whether a raw reading is in the accelerated skin-temperature band. */
-static uint8_t rider_filter_in_normal_band(int16_t temperature_centi)
+/** Return whether a raw reading is in the typical chest-contact band. */
+static uint8_t rider_filter_in_typical_band(int16_t temperature_centi)
 {
-    return temperature_centi >= RIDER_TEMP_FILTER_NORMAL_MIN_CENTI &&
-           temperature_centi <= RIDER_TEMP_FILTER_NORMAL_MAX_CENTI;
+    return temperature_centi >= RIDER_TEMP_FILTER_TYPICAL_MIN_CENTI &&
+           temperature_centi <= RIDER_TEMP_FILTER_TYPICAL_MAX_CENTI;
 }
 
 /** Track a fast cooling episode before it is allowed to affect core output.
@@ -247,23 +247,26 @@ void rider_temp_filter_consume(const rider_temperature_sample_t *sample,
         return;
     }
 
-    /* A confirmed detach stays latched until a fresh run of normal skin
-     * samples is observed. This prevents a detached sensor sitting at a
-     * cool-but-in-window temperature from becoming stable again by count. */
+    /* A confirmed detach stays latched until a fresh run returns close to the
+     * pre-drop contact temperature.  The broad 32~40 C evidence band alone is
+     * insufficient because an off-body probe can settle inside that band. */
     if (rider_filter.detach_latched) {
-        if (rider_filter_in_normal_band(sample->temperature_centi)) {
+        if (rider_filter_in_typical_band(sample->temperature_centi) &&
+            sample->temperature_centi >=
+                rider_filter.detach_peak_centi -
+                    RIDER_TEMP_FILTER_REATTACH_MARGIN_CENTI) {
             if (rider_filter.detach_recovery_samples <
-                RIDER_TEMP_FILTER_NORMAL_SAMPLES) {
+                RIDER_TEMP_FILTER_TYPICAL_SAMPLES) {
                 rider_filter.detach_recovery_samples++;
             }
         } else {
             rider_filter.detach_recovery_samples = 0;
         }
         if (rider_filter.detach_recovery_samples >=
-            RIDER_TEMP_FILTER_NORMAL_SAMPLES) {
+            RIDER_TEMP_FILTER_TYPICAL_SAMPLES) {
             rider_filter_reset_history();
             rider_filter_set_invalid(output, RIDER_TEMP_STATUS_NOT_WORN,
-                                     RIDER_TEMP_STATE_WARMING);
+                                     RIDER_TEMP_STATE_CONTACT_SETTLING);
             output->sequence = sample->sequence;
             return;
         }
@@ -305,37 +308,43 @@ void rider_temp_filter_consume(const rider_temperature_sample_t *sample,
         return;
     }
 
-    if (rider_filter.valid_samples < RIDER_TEMP_FILTER_STABLE_SAMPLES) {
-        rider_filter.valid_samples++;
+    if (rider_filter.contact_samples < RIDER_TEMP_FILTER_TRUSTED_SAMPLES) {
+        rider_filter.contact_samples++;
     }
-    if (!rider_filter.stable_latched) {
-        if (rider_filter_in_normal_band(sample->temperature_centi)) {
-            if (rider_filter.normal_samples < RIDER_TEMP_FILTER_NORMAL_SAMPLES) {
-                rider_filter.normal_samples++;
-            }
-        } else {
-            rider_filter.normal_samples = 0;
+    if (rider_filter_in_typical_band(sample->temperature_centi)) {
+        if (rider_filter.typical_samples < RIDER_TEMP_FILTER_TYPICAL_SAMPLES) {
+            rider_filter.typical_samples++;
         }
-        if (rider_filter.valid_samples >= RIDER_TEMP_FILTER_STABLE_SAMPLES ||
-            rider_filter.normal_samples >= RIDER_TEMP_FILTER_NORMAL_SAMPLES) {
-            /* Qualification is latched for this continuous wear episode. A
-             * later in-window fluctuation must not make BLE state oscillate. */
-            rider_filter.stable_latched = 1;
-        }
+    } else {
+        rider_filter.typical_samples = 0;
+    }
+    if (!rider_filter.skin_trusted_latched &&
+        rider_filter.contact_samples >= RIDER_TEMP_FILTER_TRUSTED_SAMPLES) {
+        /* Trust is latched for this continuous wear episode. The typical
+         * 32~40 C band is deliberately not a shortcut: five plausible values
+         * fill the median filter but cannot prove durable skin contact. */
+        rider_filter.skin_trusted_latched = 1;
     }
     output->sequence = sample->sequence;
     output->filtered_temperature_centi = rider_filter.filtered_temperature_centi;
     output->slope_centi_per_min = slope;
-    output->valid_samples = rider_filter.valid_samples;
-    output->normal_samples = rider_filter.normal_samples;
+    output->contact_samples = rider_filter.contact_samples;
+    output->typical_samples = rider_filter.typical_samples;
     output->valid = 1;
-    /* Candidate samples remain usable as contact diagnostics, but never feed
-     * the core model until the cooling episode recovers or is rejected. */
-    output->core_input_valid = rider_filter.detach_candidate_samples == 0;
+    output->skin_trusted = rider_filter.skin_trusted_latched &&
+                           rider_filter.detach_candidate_samples == 0;
+    /* A possible detach remains visible as a filtered contact diagnostic, but
+     * it leaves both trusted-skin and core timelines until recovery. */
+    output->core_input_valid = output->skin_trusted;
     output->status = RIDER_TEMP_STATUS_OK;
-    output->state = rider_filter.stable_latched ? RIDER_TEMP_STATE_STABLE
-                                                : RIDER_TEMP_STATE_WARMING;
-    if (output->state == RIDER_TEMP_STATE_STABLE) {
+    if (rider_filter.detach_candidate_samples) {
+        output->state = RIDER_TEMP_STATE_DETACH_SUSPECTED;
+    } else if (rider_filter.skin_trusted_latched) {
+        output->state = RIDER_TEMP_STATE_SKIN_TRUSTED;
+    } else {
+        output->state = RIDER_TEMP_STATE_CONTACT_SETTLING;
+    }
+    if (output->state == RIDER_TEMP_STATE_SKIN_TRUSTED) {
         output->quality = (slope < -RIDER_TEMP_FILTER_SLOPE_LIMIT_CPM ||
                            slope > RIDER_TEMP_FILTER_SLOPE_LIMIT_CPM)
                               ? RIDER_TEMP_QUALITY_FAIR

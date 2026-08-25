@@ -14,7 +14,8 @@ uint16_t rider_encode_core_temperature_frame(
         return 0;
     }
 
-    /* Control Point 0x13 is supported, but no external HR is a valid state. */
+    /* BLE Quality & State reports HR signal reception (0x10/0x20). Whether
+     * Core V1 actually used that signal is model metadata logged separately. */
     quality_state |= 0x10;
     if (snapshot && snapshot->skin_valid) {
         flags |= 0x01;

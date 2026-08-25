@@ -28,17 +28,37 @@ enum rider_temperature_status {
     RIDER_TEMP_STATUS_NOT_WORN = 4,
 };
 
-/* The state describes the signal lifecycle, independently of the 1-Wire
- * transport status.  A valid sample inside the wear window may be exposed as
- * the single-site skin/contact temperature while warming; core publication
- * still requires stability. */
+/* Contact qualification is independent of both the 1-Wire transport and the
+ * core model.  CONTACT_SETTLING may expose a filtered contact diagnostic, but
+ * only SKIN_TRUSTED is allowed onto the trusted-skin timeline. */
 enum rider_temperature_state {
     RIDER_TEMP_STATE_NO_DEVICE = 0,
     RIDER_TEMP_STATE_NOT_WORN = 1,
-    RIDER_TEMP_STATE_WARMING = 2,
-    RIDER_TEMP_STATE_STABLE = 3,
+    RIDER_TEMP_STATE_CONTACT_SETTLING = 2,
+    RIDER_TEMP_STATE_SKIN_TRUSTED = 3,
     RIDER_TEMP_STATE_DETACH_SUSPECTED = 4,
     RIDER_TEMP_STATE_STALE = 5,
+};
+
+/* Source compatibility for board diagnostics and older host integrations.
+ * New code must use the names above because skin trust is not thermal
+ * steadiness and does not imply that the core model is ready. */
+#define RIDER_TEMP_STATE_WARMING RIDER_TEMP_STATE_CONTACT_SETTLING
+#define RIDER_TEMP_STATE_STABLE  RIDER_TEMP_STATE_SKIN_TRUSTED
+
+/** Lifecycle of the experimental core estimate, separate from skin trust. */
+enum rider_core_temperature_state {
+    RIDER_CORE_STATE_EMPTY = 0,
+    RIDER_CORE_STATE_WARMUP = 1,
+    RIDER_CORE_STATE_READY = 2,
+    RIDER_CORE_STATE_HOLD = 3,
+    RIDER_CORE_STATE_INVALID = 4,
+};
+
+/** Identify which feature set produced the current experimental candidate. */
+enum rider_core_model_mode {
+    RIDER_CORE_MODEL_SKIN_ONLY = 0,
+    RIDER_CORE_MODEL_SKIN_AND_HR = 1,
 };
 
 enum rider_temperature_quality {
@@ -63,15 +83,21 @@ enum rider_temperature_freshness {
 #define RIDER_CORE_TEMP_WEAR_MIN_CENTI       3000
 #define RIDER_CORE_TEMP_WEAR_MAX_CENTI       4500
 
-/* Filter parameters are deliberately conservative for the fixed chest-strap
- * prototype.  The normal-band shortcut accelerates qualification when five
- * consecutive readings already look like ordinary skin temperature; the
- * broader 30-sample path remains the fallback for slower warm-up episodes. */
+/* Filter parameters are bring-up defaults for the fixed chest-strap probe.
+ * Five samples fill the robust median window; they never qualify skin or core
+ * by themselves.  Thirty contiguous valid samples establish trusted skin.
+ * The 32~40 C band is only typical-contact evidence and detach recovery, not
+ * a physiological validity range. */
 #define RIDER_TEMP_FILTER_MEDIAN_SAMPLES     5
-#define RIDER_TEMP_FILTER_STABLE_SAMPLES     30
-#define RIDER_TEMP_FILTER_NORMAL_SAMPLES     5
-#define RIDER_TEMP_FILTER_NORMAL_MIN_CENTI   3500
-#define RIDER_TEMP_FILTER_NORMAL_MAX_CENTI   3800
+#define RIDER_TEMP_FILTER_TRUSTED_SAMPLES    30
+#define RIDER_TEMP_FILTER_TYPICAL_SAMPLES    5
+#define RIDER_TEMP_FILTER_TYPICAL_MIN_CENTI  3200
+#define RIDER_TEMP_FILTER_TYPICAL_MAX_CENTI  4000
+/* Deprecated parameter aliases retained for out-of-tree host tests. */
+#define RIDER_TEMP_FILTER_STABLE_SAMPLES RIDER_TEMP_FILTER_TRUSTED_SAMPLES
+#define RIDER_TEMP_FILTER_NORMAL_SAMPLES RIDER_TEMP_FILTER_TYPICAL_SAMPLES
+#define RIDER_TEMP_FILTER_NORMAL_MIN_CENTI RIDER_TEMP_FILTER_TYPICAL_MIN_CENTI
+#define RIDER_TEMP_FILTER_NORMAL_MAX_CENTI RIDER_TEMP_FILTER_TYPICAL_MAX_CENTI
 #define RIDER_TEMP_FILTER_MAX_GAP_SAMPLES    3
 #define RIDER_TEMP_STALE_AFTER_TICKS         3
 #define RIDER_TEMP_FILTER_EWMA_ALPHA_Q8      64
@@ -83,6 +109,7 @@ enum rider_temperature_freshness {
 #define RIDER_TEMP_FILTER_DETACH_CONFIRM_SAMPLES 5
 #define RIDER_TEMP_FILTER_DETACH_MIN_DROP_CENTI 50
 #define RIDER_TEMP_FILTER_DETACH_RECOVERY_SLOPE_CPM 30
+#define RIDER_TEMP_FILTER_REATTACH_MARGIN_CENTI 75
 
 /* Publication is intentionally separate from model validity. EXPERIMENTAL
  * publishes the unverified candidate so real rides can be recorded; STRICT
@@ -102,15 +129,47 @@ enum rider_temperature_freshness {
 #ifndef RIDER_CORE_TEMP_CALIBRATION_AVAILABLE
 #define RIDER_CORE_TEMP_CALIBRATION_AVAILABLE RIDER_CORE_TEMP_CALIBRATION_VALID
 #endif
-#ifndef RIDER_CORE_TEMP_CAL_OFFSET_CENTI
-#define RIDER_CORE_TEMP_CAL_OFFSET_CENTI     0
+#ifndef RIDER_CORE_TEMP_CAL_BASE_CENTI
+#define RIDER_CORE_TEMP_CAL_BASE_CENTI       3680
 #endif
-#ifndef RIDER_CORE_TEMP_CAL_SLOPE_GAIN_Q8
-#define RIDER_CORE_TEMP_CAL_SLOPE_GAIN_Q8    0
+#ifndef RIDER_CORE_TEMP_CAL_SKIN_GAIN_Q8
+#define RIDER_CORE_TEMP_CAL_SKIN_GAIN_Q8     21
+#endif
+#ifndef RIDER_CORE_TEMP_CAL_SKIN_DELTA_GAIN_Q8
+#define RIDER_CORE_TEMP_CAL_SKIN_DELTA_GAIN_Q8 64
+#endif
+#ifndef RIDER_CORE_TEMP_CAL_TREND_1M_GAIN_Q8
+#define RIDER_CORE_TEMP_CAL_TREND_1M_GAIN_Q8 16
+#endif
+#ifndef RIDER_CORE_TEMP_CAL_TREND_5M_GAIN_Q8
+#define RIDER_CORE_TEMP_CAL_TREND_5M_GAIN_Q8 32
+#endif
+#ifndef RIDER_CORE_TEMP_CAL_HR_GAIN_Q8
+#define RIDER_CORE_TEMP_CAL_HR_GAIN_Q8       256
+#endif
+#ifndef RIDER_CORE_TEMP_CAL_HR_TREND_GAIN_Q8
+#define RIDER_CORE_TEMP_CAL_HR_TREND_GAIN_Q8 32
 #endif
 #ifndef RIDER_CORE_TEMP_CAL_LAG_ALPHA_Q8
-#define RIDER_CORE_TEMP_CAL_LAG_ALPHA_Q8     32
+#define RIDER_CORE_TEMP_CAL_LAG_ALPHA_Q8     8
 #endif
+/* V1 uses five-second history points for minute-scale features. Sixty-one
+ * points cover both endpoints of a full five-minute interval; skin, sequence,
+ * optional HR and bookkeeping consume about 512 bytes. */
+#define RIDER_CORE_TEMP_MODEL_VERSION         1
+#ifndef RIDER_CORE_TEMP_CAL_MODEL_VERSION
+#define RIDER_CORE_TEMP_CAL_MODEL_VERSION     0
+#endif
+#if RIDER_CORE_TEMP_CALIBRATION_AVAILABLE && \
+    RIDER_CORE_TEMP_CAL_MODEL_VERSION != RIDER_CORE_TEMP_MODEL_VERSION
+#error "Rider core calibration model version does not match firmware"
+#endif
+#define RIDER_CORE_TEMP_HISTORY_STEP_SECONDS  5
+#define RIDER_CORE_TEMP_HISTORY_SECONDS       300
+#define RIDER_CORE_TEMP_HISTORY_SLOTS         61
+#define RIDER_CORE_TEMP_BASELINE_SAMPLES      30
+#define RIDER_CORE_TEMP_SKIN_REFERENCE_CENTI  3500
+#define RIDER_CORE_TEMP_HR_REFERENCE_BPM      80
 #define RIDER_CORE_TEMP_ESTIMATE_MIN_CENTI   3500
 #define RIDER_CORE_TEMP_ESTIMATE_MAX_CENTI   4200
 /* The scheduler consumes one sample per second.  This is a physiological
@@ -129,10 +188,11 @@ typedef struct {
     uint32_t sequence;
     int16_t filtered_temperature_centi;
     int16_t slope_centi_per_min;
-    uint16_t valid_samples; /* Valid samples in the current wear episode. */
-    uint8_t normal_samples; /* Samples in the accelerated 35~38 C band. */
+    uint16_t contact_samples; /* Contiguous valid samples in this wear episode. */
+    uint8_t typical_samples; /* Consecutive samples in the 32~40 C evidence band. */
     uint8_t valid;
-    uint8_t core_input_valid; /* False while a possible detach is evaluated. */
+    uint8_t skin_trusted;
+    uint8_t core_input_valid; /* Trusted and not under detach evaluation. */
     uint8_t quality;
     uint8_t status;
     uint8_t state;
@@ -140,8 +200,13 @@ typedef struct {
 } rider_temperature_filter_output_t;
 
 typedef struct {
-    int16_t offset_centi;
-    int16_t slope_gain_q8;
+    int16_t base_core_centi;
+    int16_t skin_gain_q8;
+    int16_t skin_delta_gain_q8;
+    int16_t trend_1m_gain_q8;
+    int16_t trend_5m_gain_q8;
+    int16_t heart_rate_gain_q8;
+    int16_t heart_rate_trend_gain_q8;
     uint8_t lag_alpha_q8;
     uint8_t available;
     uint8_t valid;
@@ -149,13 +214,23 @@ typedef struct {
 
 typedef struct {
     uint32_t sequence;
+    uint32_t skin_source_sequence;
+    uint32_t core_source_sequence;
+    int16_t sensor_temperature_centi;
     int16_t contact_temperature_centi;
     int16_t skin_temperature_centi;
     int16_t core_temperature_centi;
     int16_t slope_centi_per_min;
+    int16_t skin_baseline_centi;
+    int16_t skin_delta_1m_centi;
+    int16_t skin_delta_5m_centi;
+    int16_t heart_rate_delta_1m;
+    uint16_t core_history_seconds;
+    uint16_t contact_samples;
     uint8_t valid;
+    uint8_t sensor_valid;
     uint8_t contact_valid;
-    uint8_t skin_valid;              /* Filtered single-site skin/contact value. */
+    uint8_t skin_valid;              /* Qualified single-site trusted skin value. */
     uint8_t core_input_valid;         /* Current sample may update the model. */
     uint8_t core_estimate_valid;     /* Numerical candidate is available. */
     uint8_t core_estimate_verified;  /* Held-out validation gate has passed. */
@@ -163,11 +238,14 @@ typedef struct {
     uint8_t confidence;
     uint8_t sensor_status;
     uint8_t temperature_state;
+    uint8_t core_state;
     uint8_t data_freshness;
-    uint16_t warmup_valid_samples; /* Diagnostic-only qualification progress. */
-    uint8_t warmup_normal_samples; /* Diagnostic-only normal-band count. */
+    uint8_t typical_samples;
     uint8_t heart_rate;
     uint8_t heart_rate_valid;
+    uint8_t heart_rate_used;
+    uint8_t model_mode;
+    uint8_t model_version;
 } rider_temperature_snapshot_t;
 
 /** BLE state used by the board diagnostic indicator, independent of GATT data. */
@@ -221,6 +299,6 @@ int bt_comm_ble_hci_event_handler(struct bt_event *bt);
 #define RIDER_CORE_TEMP_NAME "ICXL-RTemp"
 #define RIDER_CORE_TEMP_MANUFACTURER "ICXL"
 #define RIDER_CORE_TEMP_MODEL "CoreTemp-Rider"
-#define RIDER_CORE_TEMP_FIRMWARE_VERSION "0.1.0"
+#define RIDER_CORE_TEMP_FIRMWARE_VERSION "0.2.0"
 
 #endif

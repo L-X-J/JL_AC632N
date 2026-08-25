@@ -27,8 +27,9 @@ apps/rider_core_temp/
 ```text
 PB7(IO_PORTB_07)
   -> m601_1wire.c: reset / CONVERT T / READ SCRATCHPAD
-  -> rider_temp_filter.c: 中值/EWMA、斜率和佩戴状态
-  -> rider_core_estimator.c: 接触/皮肤字段与校准核心影子估算
+  -> rider_temp_filter.c: 中值/EWMA、斜率、接触资格和可信皮温
+  -> rider_core_estimator.c: Sensor / Trusted Skin / Experimental Core 三条时间线
+       -> 30 秒可信皮温门控 -> 5 分钟历史特征 -> Core V1 Q8 估算
   -> core_temp_gatt.c + rider_temp_codec.c: CORE/HTS 帧、广播和通知
   -> BLE Central
 
@@ -61,7 +62,7 @@ LED 行为如下：
 | 指示灯 | 含义 |
 |---|---|
 | LED1 红 | BLE 未启动熄灭；广播时慢闪；连接后常亮 |
-| LED2 绿 | M601 预热或快速下降候选时慢闪；稳定且核心模型接收当前样本后常亮；未检测到器件时快闪 |
+| LED2 绿 | 接触确认或 Core 五分钟预热时慢闪；可信皮温和 Core 候选都可导出时常亮；未检测到器件时快闪 |
 | LED3 蓝 | CRC 错误慢闪；物理范围/未佩戴双脉冲；IOKey2 打印状态时短暂闪烁 |
 
 IOKey1 按下会依次点亮三色灯完成约 1.2 秒自检；IOKey2 按下会输出一次 BLE/温度快照，不改变 BLE 协议状态。未接跳线的按键应保持释放状态。
@@ -82,9 +83,15 @@ profile 使用 `include/core_temp_profile.h` 中的静态 ATT 数据，所有多
 | Device Information / Model Number | `0x180A` / `0x2A24` | Read | `0x0021` | - |
 | Device Information / Firmware Revision | `0x180A` / `0x2A26` | Read | `0x0023` | - |
 
-CORE 温度通知的核心温度字段是有符号百分之一摄氏度；当前实现同时支持 M601 固定贴肤点的合法 Skin Temperature、算法 Core Temperature、Quality & State 和外部心率字段。通过 `30~45°C` 佩戴窗口和 M601 校验的有效样本，在 `WARMING` 阶段先附带 Skin Temperature，核心字段保持 `0x7FFF`；连续 5 个原始样本落在正常 `35~38°C` 区间，或累计 30 个佩戴窗口内有效样本后进入 `STABLE`。当前 AC632N 板级显式选择 `EXPERIMENTAL`：稳定后将多个有效皮肤样本经过中值/EWMA、斜率、滞后和限速模型得到的 Core 候选，与 Skin 字段同时发送到自定义 CORE，供码表记录和现实场景校准；该候选尚未通过参考核心温度验证，不能当作医疗核心体温。核心滞后状态使用 Q8 小数累积，正向和负向变化使用同一条路径，避免皮温下降时被整数舍入吞掉。若滤波后的皮温快速下降并持续约 5 秒没有回升，进入 `DETACH_SUSPECTED`：核心模型冻结，确认后 Skin/Core 均发送无效值；重新连续 5 个 `35~38°C` 样本后才清空历史并重新预热。标准 HTS 和广播只发送 Core 候选，不承载 Skin 字段。完成留出时段验证后才切换 `STRICT`；`CONTACT_PROXY` 仅保留作旧版本对比。Quality 低 4 位反映滤波后的温度信号质量；没有外部心率时，仅心率关联状态表示“支持但未收到信号”。Control Point 只实现协议文档中约定的外部心率输入 `0x13`，其他操作返回“不支持”。核心无效温度编码为 `0x7FFF`。
+本轮实验固件的 Firmware Revision 为 `0.2.0`，Core 模型版本为 `1`。每次人体/骑行实验都应把设备地址、固件版本、模型版本和标定 header 的来源与码表导出文件一起登记；仅凭温度列无法判断数据使用了哪套门控和系数。
 
-标准 Health Thermometer 使用 IEEE 11073 FLOAT，分辨率为 `10^-2 °C`；无效值使用 NaN mantissa `0x007FFFFF`。`2A1C` 提供 **Read + Notify**，兼容 DURA 在订阅前主动读取当前值的流程；Temperature Type 由独立的 `2A1D` 读取。CCCD 写响应完成后，固件在 ATT 可发送窗口推送首帧，后续按约 10 秒节拍发送。自定义 CORE `0x2101` 按采样节拍约 1 Hz 发送：WARMING 带合法 Skin、Core 无效；STABLE 同时带合法 Skin 和实验性算法 Core。profile 保持 CORE 自定义服务在 HTS 之前，但 Central 必须按 UUID 发现服务和特征，不能依赖句柄或服务序号。当前板级 `EXPERIMENTAL` 和经过验证的 `STRICT` 模式都可附带 Manufacturer Specific Data 的 Core 字段；`SHADOW` 模式省略无效 Core，广播温度单位为千分之一摄氏度。为避免旧式广播数据更新产生的停播/重启窗口，未连接期间只在测量可用状态改变时刷新广播；每次断开连接后会在 SDK 自动恢复广播前装入最新温度。当前 M601 直接测量固定贴肤点，Skin 字段是该位置的滤波值；Core 是多个有效皮肤样本经过模型得到的实验候选。平均温度属于码表侧历史统计，未知字段不会被编码为 0 值伪造。算法研究与标定流程见 [`doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md`](../../doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md)。
+CORE 温度通知的 Core 和 Skin 都是有符号百分之一摄氏度。当前实现把三个阶段分开：原始 Sensor 样本先通过 CRC、物理范围和 `30~45°C` 佩戴保护窗；5 点中值和 EWMA 形成接触温度；连续约 30 秒有效接触后，才把该固定胸带位置的滤波值标记为 Trusted Skin。`32~40°C` 是典型贴肤证据和重新佩戴辅助条件，不是可信皮温捷径，也不是人体核心温度范围。可信皮温建立后，自定义 CORE 约 1 Hz 附带 Skin，Core 在模型预热阶段明确为 `0x7FFF`。
+
+当前 AC632N 板级显式选择 `EXPERIMENTAL`。Core V1 保存 5 秒间隔、覆盖约 5 分钟的可信皮温历史，并使用本次佩戴基线、1/5 分钟皮温变化和可选外部心率计算 Q8 实验候选；约 5 分钟历史满足后才进入独立的 `READY` 状态，随后按采样节拍更新 Core。输出超出 `35~42°C` 时整帧 Core 判为无效而不是钳制到边界，每秒变化另受 `0.25°C` 保护。滤波皮温快速下降时，Trusted Skin 和 Core 立即暂停；确认脱落后必须连续 5 个 `32~40°C` 样本且回到脱落前峰值 `0.75°C` 范围内，才开始新的 30 秒可信皮温与 5 分钟 Core 预热。标准 HTS 和广播只承载 Core，不承载 Skin；完成完整骑行 Session 留出验证后才可切换 `STRICT`，`CONTACT_PROXY` 只保留用于旧版本对比。
+
+Quality 低 4 位反映当前皮温信号质量。Quality & State 高半字节按 CORE V2.2 正式取值编码：`0x10` 表示支持心率但当前未接收，`0x20` 表示正在接收；截图资料中“加 16 表示使用心率”按旧版/简化说明记录，不用来覆盖 V2.2 位值。诊断元数据中的 `heart_rate_used` 另行表示本次 Core V1 计算是否实际采用心率，避免把“已收到”和“已参与模型”混为一谈。Control Point 只实现外部心率输入 `0x13`，其他操作返回“不支持”。Core 无效值统一编码为 `0x7FFF`。
+
+标准 Health Thermometer 使用 IEEE 11073 FLOAT，分辨率为 `10^-2 °C`；无效值使用 NaN mantissa `0x007FFFFF`。`2A1C` 提供 **Read + Notify**，兼容 DURA 在订阅前主动读取当前值的流程；Temperature Type 由独立的 `2A1D` 读取。CCCD 写响应完成后，固件在 ATT 可发送窗口推送首个可用值。自定义 CORE `0x2101` 在 `SKIN_TRUSTED` 后约 1 Hz 发送：Core V1 `WARMUP` 时带可信 Skin 和无效 Core，`READY` 时同时带可信 Skin 和实验性 Core。HTS 只在 Core `READY` 后按约 10 秒节拍发送。profile 保持 CORE 自定义服务在 HTS 之前，但 Central 必须按 UUID 发现服务和特征，不能依赖句柄或服务序号。当前板级 `EXPERIMENTAL` 和经过验证的 `STRICT` 模式都可附带 Manufacturer Specific Data 的 Core 字段；`SHADOW` 模式省略无效 Core，广播温度单位为千分之一摄氏度。为避免旧式广播数据更新产生的停播/重启窗口，未连接期间只在 Core 可用状态改变时刷新广播；每次断开连接后会在 SDK 自动恢复广播前装入最新温度。平均温度属于码表侧历史统计，未知字段不会被编码为 0 值伪造。算法研究与标定流程见 [`doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md`](../../doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md)。
 
 Battery Level 始终返回协议规定的 `0-100`。当前板级没有独立 fuel-gauge，固件使用 AC632N `AD_CH_VBAT` 的电压估算：默认 `3.30V=0%`、`4.22V=100%`，阈值位于 `board/bd19/board_ac632n_rider_cfg.h`，必须按实际电池和分压校准。该值是电压估算，不代表精确剩余容量。
 
@@ -108,21 +115,21 @@ PB7 (`IO_PORTB_07`) 由 M601 1-Wire 总线独占：
 
 `-40.00°C` 到 `125.00°C` 是 M601 的电气/物理读数范围，不是佩戴判定。应用估算层另用默认 `30.00°C` 到 `45.00°C` 的产品区间过滤环境读数；例如脱离人体后常见的 `23.00°C` 会被标记为 `RIDER_TEMP_STATUS_NOT_WORN`（status=4），不会成为有效核心温度。该区间定义在 `include/rider_core_temp.h`，量产时可按结构和实测校准。
 
-无设备、CRC 错误、物理范围错误、未佩戴或连续约 3 秒没有新序号的样本都会保留为无效快照并进入 `STALE`，并清空当前预热资格；ATT Read 返回协议规定的无效哨兵值。通过佩戴窗口但尚未完成预热的样本只允许进入自定义 CORE 的 Skin Temperature 字段，核心字段仍为 `0x7FFF`，HTS 和温度广播仍等待核心发布门控；板级 `EXPERIMENTAL` 在稳定接触后把滤波后的 M601 Skin 与算法 Core 候选同时送入自定义 CORE，并把 Core 候选送入 HTS/广播。这样码表不会把断报或 `23°C` 当成低温样本参与平均；Skin 和实验 Core 的历史平均都应保留字段语义，Core 不应标注为已验证核心体温。平均温度仍由码表对有效历史样本自行统计。
+无设备、CRC 错误、物理范围错误、未佩戴或连续约 3 秒没有新序号的样本都会形成无效快照，清空当前皮温/Core episode；ATT Read 返回协议规定的无效哨兵值。`CONTACT_SETTLING` 期间只保留内部接触诊断，不发送 Skin Notification；约 30 秒后进入 `SKIN_TRUSTED`，自定义 CORE 才开始发送可信 Skin。Core V1 继续预热约 5 分钟，此时自定义帧的 Core 为 `0x7FFF`，HTS 和温度广播仍等待 Core 发布门控；进入 `READY` 后，板级 `EXPERIMENTAL` 把 Skin 与 Core 候选同时送入自定义 CORE，并把 Core 候选送入 HTS/广播。这样码表不会把断报、未确认接触或 `23°C` 当成低温样本；Core 必须保留“实验值”语义，平均值仍由码表只对相应有效历史样本统计。
 
 ## 串口诊断日志
 
 板级 UART0 调试输出为 `IO_PORTA_00`（PA0，TX）、`1000000 baud`、8N1。使用 USB-UART 转接器时，将转接器 RX 接 PA0、GND 共地。日志通过现有 `log_info`/`put_buf` 路径输出，重点前缀如下：
 
 - `[RIDER_TEMP]`：M601 presence、转换启动、9 字节 scratchpad、CRC 期望值/收到值、原始温度和状态。
-- `[RIDER_ESTIMATOR]`：采样序号、接触/皮肤温度、核心估算有效性、发布模式、质量、置信度、佩戴状态和新鲜度；EXPERIMENTAL 会记录并发送算法 Core 候选，STRICT 还要求核心标定验证通过，CONTACT_PROXY 只记录旧的接触温度代理。
+- `[RIDER_ESTIMATOR]`：Sensor/Skin/Core 来源序号、三路温度、皮温与 Core 状态、5 分钟历史、基线、1/5 分钟变化、模型版本/模式、心率是否实际采用和发布资格。
 - `[RIDER_GATT]`：ATT 读/写、CCCD、CORE/HTS 读值和通知帧、广播主包与扫描响应原始字节。
 
-串口中 `ble=0/1/2` 分别表示未启动、广播、已连接；`contact_centi=3650` 和 `skin_centi=3650` 表示滤波后的合法贴肤温度 `36.50°C`，`core_est_centi=3650` 表示实验性算法候选，`publish_mode=3 publish_core_centi=3650` 表示当前板级正在发送该 Core 候选。`warmup=有效样本数/35~38°C样本数` 用于判断 LED2 一直慢闪的原因；估算器在温度状态或新鲜度变化时会打印完整快照。M601 原始采样的 `status=0` 表示通过 CRC 和物理范围；估算器快照的 `state=0/1/2/3/4/5` 分别表示无设备、未佩戴、预热、稳定、疑似脱离、陈旧，`freshness=0/1/2` 分别表示不可用、最新、陈旧。无效核心温度统一打印为 `NA(32767)`，不会把未知字段伪装成 `0°C`。若持续出现 `status=2`，应优先核对 M601 CRC 多项式和 PB7 上拉/时序；若持续出现 `status=1`，应核对 PB7 连线、外部上拉和传感器供电；若持续出现 `status=4`，应确认传感器贴合位置并按实际佩戴曲线校准区间。
+串口中 `ble=0/1/2` 分别表示未启动、广播、已连接；`sensor_seq/skin_seq/core_seq` 可把三条时间线按来源样本对齐，`32767` 表示该时间线当前无值。`contact_samples` 从 0 累加到 30，用于可信皮温门控；`typical` 是连续 `32~40°C` 证据计数，不会提前解锁可信皮温；`history_s` 从 0 累加到 300，用于 Core V1 预热。皮温状态 `0/1/2/3/4/5` 分别为 `NO_DEVICE/NOT_WORN/CONTACT_SETTLING/SKIN_TRUSTED/DETACH_SUSPECTED/STALE`；Core 状态 `0/1/2/3/4` 分别为 `EMPTY/WARMUP/READY/HOLD/INVALID`。`model=v1/0` 是 Skin-only，`model=v1/1` 是 Skin+HR；`hr_used=1` 才表示该次候选使用了心率。无效温度不会伪装成 `0°C`。若持续出现 `status=2`，应优先核对 M601 CRC 多项式和 PB7 上拉/时序；若持续出现 `status=1`，应核对 PB7 连线、外部上拉和传感器供电；若持续出现 `status=4`，应确认传感器贴合位置并按实际佩戴曲线校准区间。
 
 单 M601 核心估算的离线拟合、连续留出时段验证和 `<=0.5°C` 误差门槛见 [`单M601温度算法研究与验证.md`](../../doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md)。当前板级使用 `EXPERIMENTAL` 是为了采集真实场景数据，不代表模型已经通过验证；完成标定和门槛审查后再切换 `STRICT`，不要把实验候选误称为医疗核心体温。
 
-标定 CSV 如果包含多次实验，应使用 `session_id` 并按完整时段留出，例如
+标定 CSV 至少提供 `timestamp`、可信皮温、参考核心温度和可信状态；可选提供 `heart_rate`、`heart_rate_valid`、参考皮温与 `session_id`。如果包含多次实验，应按完整时段留出，例如
 `python3 tools/rider_core_temp_calibrate.py samples.csv --holdout-session exercise`；这会避免同一运动时段同时出现在拟合集和验证集。滤波状态机和标定工具的主机回归统一运行：
 
 ```sh
@@ -157,7 +164,7 @@ ac632n-workbench-cli.exe flash --project <project-dir>
 
 CLion 代码索引目标为 `ac632n_rider_core_temp_indexing`，固件链接仍由 `apps/rider_core_temp/board/bd19/Makefile` 负责。当前开发机若未安装杰理 q32s 工具链（`clang`、`lto-wrapper`、`lto-ar`），只能完成 Make dry-run、CMake 配置和主机侧语法/索引检查，不能声称固件已完成链接或可烧录。
 
-硬件验收必须至少覆盖：广播服务 UUID 和名称、连接/断连、温度与标准体温 CCCD、Control Point indication（连续写入应返回 busy）、无设备/CRC 错误、`23°C` 脱落、快速下降后 `DETACH_SUSPECTED`、重新贴肤预热、单点尖峰、连续断报/重新佩戴、预热到稳定状态、CORE Flags/皮温字段、EXPERIMENTAL 下 Skin 与算法 Core 同帧、SHADOW 下的核心 `0x7FFF` 和 HTS NaN 编码、PB7 上拉和长线时序，以及 VBAT ADC/电池百分比阈值校准。主机 codec 回归还验证 `36.75°C` 的 `3675` 小端 mantissa 和 HTS `0xFE` exponent。
+硬件验收必须至少覆盖：广播服务 UUID 和名称、连接/断连、温度与标准体温 CCCD、Control Point indication（连续写入应返回 busy）、无设备/CRC 错误、`23°C` 脱落、快速下降后 `DETACH_SUSPECTED`、重新贴肤、5 样本不能提前解锁、30 秒可信皮温边界、5 分钟 Core `READY` 边界、单点尖峰、连续断报、CORE Flags/皮温字段、Skin-only 与 Skin+HR 模式、心率超时回退、EXPERIMENTAL 下 Skin 与算法 Core 同帧、越界 Core 失效而非钳制、SHADOW 下的核心 `0x7FFF` 和 HTS NaN 编码、PB7 上拉和长线时序，以及 VBAT ADC/电池百分比阈值校准。主机 codec 回归还验证 `36.75°C` 的 `3675` 小端 mantissa 和 HTS `0xFE` exponent。
 
 ## 扩展方式和禁止事项
 

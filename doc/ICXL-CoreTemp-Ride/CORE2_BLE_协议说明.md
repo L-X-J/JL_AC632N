@@ -123,7 +123,7 @@ Offset  长度  字段
 | Heart Rate | `UINT8` | BPM；值 `0` 表示当前没有心率信号 |
 | Heat Strain Index | `UINT8` | 数值 ÷ 10，范围约 `0.0`–`25.4` |
 
-核心温度为 `0x7FFF`（十进制 `32767`）时，表示 **Data not available**，不得将其换算为正常温度。M601 固定贴肤点的有效样本在 `WARMING` 或 `STABLE` 阶段可作为 Skin Temperature 字段；连续 5 个原始样本落在 `35~38°C`，或累计 30 个 `30~45°C` 佩戴窗口内有效样本，即可完成稳定资格，预热阶段核心字段仍保持 `0x7FFF`。如果滤波皮温以至少 `1.80°C/min` 快速下降、连续约 5 秒没有达到 `0.30°C/min` 的回升且累计下降达到 `0.50°C`，固件进入内部 `DETACH_SUSPECTED` 状态，冻结核心模型并把 Skin/Core 都编码为无效；重新连续 5 个 `35~38°C` 样本后清空历史并重新预热。当前 AC632N 板级选择 `EXPERIMENTAL`，达到稳定接触后 CORE 帧同时带滤波后的 M601 Skin 和多样本模型 Core 候选；该候选尚未通过参考数据验证。完成留出时段验证后才可启用 `STRICT`；`CONTACT_PROXY` 仅用于旧版本行为对比。
+核心温度为 `0x7FFF`（十进制 `32767`）时，表示 **Data not available**，不得将其换算为正常温度。Rider 固件先保留 Sensor、Trusted Skin、Experimental Core 三条时间线：M601 样本除 CRC/物理范围外还要落在 `30~45°C` 佩戴保护窗；5 个样本只填满中值窗口，连续约 30 秒有效接触后才进入 `SKIN_TRUSTED` 并开始发送 Skin。`32~40°C` 只是典型胸部贴肤和重新佩戴证据，不能提前解锁可信皮温。Core V1 再积累约 5 分钟可信皮温历史；预热期间自定义帧继续带 Skin，但 Core 保持 `0x7FFF`，完成后约 1 Hz 同帧发送实验 Core。若滤波皮温以至少 `1.80°C/min` 快速下降，Skin/Core 立即暂停；连续约 5 秒没有达到 `0.30°C/min` 的回升且累计下降 `0.50°C` 后确认脱落。确认后只有连续 5 个 `32~40°C` 样本且回到脱落前峰值 `0.75°C` 范围内，才开始新的 30 秒 Skin 和 5 分钟 Core 预热。当前 AC632N 板级选择 `EXPERIMENTAL`；候选尚未通过参考核心温度验证，完成完整骑行 Session 留出后才可启用 `STRICT`，`CONTACT_PROXY` 仅用于旧版本行为对比。
 
 #### Quality & State 字段
 
@@ -149,6 +149,8 @@ Offset  长度  字段
 
 bits 3、6–7 为保留位，应为 0。
 
+用户提供的 CORE 心率说明截图写有“使用心率时在 `core_data_quality` 加 16”，而 V2.2 正式 Quality & State 枚举将 `0x10` 定义为支持但未接收、`0x20` 定义为正在接收。当前固件按 V2.2 的线上枚举编码；是否在本次 Core V1 计算中实际采用心率只记录在串口诊断 `heart_rate_used`，协议帧不新增私有位，避免破坏兼容性。
+
 ### 4.4 通知示例
 
 完整字段示例帧：
@@ -171,7 +173,7 @@ bits 3、6–7 为保留位，应为 0。
 
 ## 5. 标准 Health Thermometer Service
 
-如果码表只实现 BLE SIG 标准 Health Thermometer Profile，可使用此服务。平均温度不是 CORE BLE 广播或 `0x2101` 的字段，而是码表基于历史样本自行统计的汇总值；Rider 的单 M601 在通过佩戴窗口的 `WARMING`/`STABLE` 阶段可作为固定贴肤点皮肤温度填入自定义 CORE 的 Skin Temperature 字段，但标准 HTS 不承载皮温。通用 `SHADOW`/严格未验证状态下，HTS 核心值保持 NaN；当前板级 `EXPERIMENTAL` 在稳定接触后发送模型 Core 候选，码表侧应将其标注为实验算法输出，不应宣称为已验证核心体温。
+如果码表只实现 BLE SIG 标准 Health Thermometer Profile，可使用此服务。平均温度不是 CORE BLE 广播或 `0x2101` 的字段，而是码表基于历史样本自行统计的汇总值。Rider 的单 M601 只有完成约 30 秒连续接触门控后，才作为固定胸带位置可信 Skin 填入自定义 CORE；标准 HTS 不承载皮温。通用 `SHADOW`/严格未验证状态下，HTS 核心值保持 NaN；当前板级 `EXPERIMENTAL` 要等 Core V1 的约 5 分钟历史完成后才发送模型候选，码表侧必须将其标注为实验算法输出，不应宣称为已验证核心体温。
 
 | 项目 | UUID | 说明 |
 |---|---|---|
@@ -193,7 +195,7 @@ CORE 的行为：
 - Flags.bit1：`0`，不带时间戳；
 - Flags.bit2：`1`，携带 Temperature Type；
 - 无有效值时发送 IEEE 11073 NaN：`0x007FFFFF`；
-- CORE 官方实现和 Wear OS 示例使用 Notification CCCD；本 Rider 固件在此基础上保留 `Read`，兼容 DURA 在订阅前主动读取当前值的流程。Rider 在 `STRICT` 模式下仅发送已验证核心估算；`SHADOW` 返回 IEEE 11073 NaN；当前板级 `EXPERIMENTAL` 在稳定接触后发送模型 Core 候选。`2A1D` 单独返回 `0x02`，HTS 当前发送节拍约为 **10 秒**。自定义 `0x2101` 温度特征按采样节拍约 1 Hz 发送，`WARMING` 带 Skin 但 Core 无效，`STABLE` 同时带 Skin 和 Core 候选；`DETACH_SUSPECTED` 期间不发送有效 Skin/Core。
+- CORE 官方实现和 Wear OS 示例使用 Notification CCCD；本 Rider 固件在此基础上保留 `Read`，兼容 DURA 在订阅前主动读取当前值的流程。Rider 在 `STRICT` 模式下仅发送已验证核心估算；`SHADOW` 返回 IEEE 11073 NaN；当前板级 `EXPERIMENTAL` 在 Core V1 `READY` 后发送模型候选。`2A1D` 单独返回 `0x02`，HTS 当前发送节拍约为 **10 秒**。自定义 `0x2101` 在 `SKIN_TRUSTED` 后按采样节拍约 1 Hz 发送：Core `WARMUP` 时带 Skin 但 Core 无效，约 5 分钟后 `READY` 同时带 Skin 和实验 Core；`CONTACT_SETTLING`、`DETACH_SUSPECTED` 或陈旧期间不发送有效 Skin/Core。
 
 ### 5.2 连接时序和认证
 
@@ -299,7 +301,7 @@ Control Point UUID：
 6. 仅需要粗略实时数值、且不希望保持连接时，解析厂商广播数据中的 `Beacon Temperature`。
 7. 断连、空帧、RFU bits 非零或长度不足的帧应丢弃并记录诊断信息，不应将异常数据展示为体温。
 
-本项目 Rider 固件另有产品侧约束：M601 通过 CRC 和 `-40~125°C` 物理范围后，还必须落在默认 `30~45°C` 佩戴区间；脱离人体产生的 `23°C` 等环境读数会按未佩戴处理。连续 5 个 `35~38°C` 原始样本或累计 30 个佩戴窗口内有效样本后，自定义 CORE 可在 `STABLE` 阶段同时带 M601 固定贴肤点皮肤字段；通用影子模式的核心字段为 `0x7FFF`，当前板级 `CONTACT_PROXY` 则仅在稳定接触后把滤波后的 M601 皮肤/接触温度映射到 CORE/HTS/广播，严格模式才会发送通过多个有效皮肤样本标定验证的核心估算。无效样本在 ATT Read 中使用 CORE/HTS 协议规定的 `0x7FFF`/IEEE FLOAT NaN 哨兵，未通过佩戴窗口或数据陈旧时不会通过已订阅的温度 Notification 反复发送。因此码表侧应对断报保持上一有效值或暂停平均统计，不能把缺失窗口按 `0°C` 或低温样本参与平均。平均温度不是 Rider 固件上报字段，仍由码表基于有效历史样本自行计算；Skin/CONTACT_PROXY 的平均只代表固定位置皮肤或接触温度趋势。
+本项目 Rider 固件另有产品侧约束：M601 通过 CRC 和 `-40~125°C` 物理范围后，还必须落在默认 `30~45°C` 佩戴保护窗；脱离人体产生的 `23°C` 等环境读数会按未佩戴处理。连续 30 个有效接触样本后，自定义 CORE 才开始发送固定胸带位置可信 Skin；Core V1 再等待完整约 5 分钟历史。通用 `SHADOW` 的 Core 字段为 `0x7FFF`；当前板级 `EXPERIMENTAL` 在 `READY` 后发送未验证 Core 候选；`STRICT` 才要求完整骑行 Session 留出和已验证标定。无效样本在 ATT Read 中使用 `0x7FFF`/IEEE FLOAT NaN 哨兵，未建立可信皮温、疑似脱落或数据陈旧时不会通过已订阅特征反复发送有效温度 Notification。因此码表侧应对断报暂停统计，不能把缺失窗口按 `0°C` 或低温样本参与平均。平均温度不是 Rider 固件上报字段，仍由码表基于有效历史样本自行计算；Skin 的平均只代表固定位置皮温趋势，Experimental Core 的平均也必须保留实验算法标签。
 
 ## 10. 参考资料
 
