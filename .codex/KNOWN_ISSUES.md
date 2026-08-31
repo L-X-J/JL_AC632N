@@ -9,3 +9,35 @@ Cause: The local environment does not contain the Jieli q32s compiler and linker
 Resolution: Run the CMake indexing target and static checks locally; run the full Make build on a host with `clang`, `lto-wrapper`, and `lto-ar` under the configured q32s toolchain path.
 
 Important: A successful CMake code-model build is not evidence that the firmware linked or is flashable. PB3/PB5 behavior still requires hardware verification.
+
+## Remote Windows build host
+
+Symptom: The local macOS checkout cannot run the q32s firmware build because the Jieli toolchain is absent.
+
+Resolution: Use the configured Windows host `xinlei@192.168.110.192`, project directory `C:\Users\pc\Documents\JL_AC632N`, and load the SSH password from `CXL_SUFACE_GO_PWD` without persisting its value.
+
+Important: Check the remote working tree before building. Preserve any remote Git changes and report them before taking actions that would overwrite or clean files.
+
+## Windows Git safe-directory ownership
+
+Symptom: Remote `git status` fails with `detected dubious ownership` because the SSH user differs from the Windows project directory owner.
+
+Resolution: Use the command-local exception `git -c safe.directory=C:/Users/pc/Documents/JL_AC632N status --short`; do not change global Git configuration just for the check.
+
+Important: The Rider build leaves firmware artifacts untracked in the remote checkout. Do not run `clean`, delete them, or revert remote changes as part of a routine build.
+
+## Remote checkout can lag the local Rider commit
+
+Symptom: The remote build may report success while missing newer Rider source files, because the remote checkout is on an older commit and stale objects can satisfy the link.
+
+Resolution: Compare local and remote commit IDs before building. Synchronize only the intended Rider source/configuration files or explicitly update the remote checkout, then force the affected compile when validating.
+
+Important: Do not treat a successful post-build packaging step as proof that the current local source was compiled.
+
+## Rider RCSP include and log configuration
+
+Symptom: A forced Rider build fails on `rcsp_user_update.h` or `log_tag_const_i_RIDER_POWER_KEY`.
+
+Cause: RCSP headers live in `JL_rcsp/rcsp_updata` and `JL_rcsp/bt_trans_data`, while the power module uses a dedicated log tag that must be defined in the Rider log configuration.
+
+Resolution: Keep both RCSP subdirectories in the Rider board Makefile include list and keep the `RIDER_POWER_KEY` constants in `apps/rider_core_temp/config/log_config.c`.

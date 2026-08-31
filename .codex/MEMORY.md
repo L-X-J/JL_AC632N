@@ -23,3 +23,13 @@
 - 固件入口是根级 Makefile/板级 Makefile；CMake 只用于 CLion 代码模型。
 - 新增 Rider 业务能力先放入 `apps/rider_core_temp`，只有多个应用稳定共享时才考虑公共组件。
 - 外部 AB202X 文档只作为按键/LED 行为及时序参考，不作为本项目硬件映射真相源。
+
+## Remote Build Environment
+
+- Windows 远程编译主机：`ssh xinlei@192.168.110.192`。
+- 远程项目目录：`C:\Users\pc\Documents\JL_AC632N`。
+- 远程 q32s 工具链位于 `C:\JL\pi32\bin`；项目自带 Make 位于 `C:\Documents and Settings\pc\My Documents\JL_AC632N\tools\utils\make.exe`，可通过 Windows 路径别名访问同一项目。
+- SSH 登录用户与项目目录所有者不同，远程 Git 检查需使用一次性的 `git -c safe.directory=C:/Users/pc/Documents/JL_AC632N status --short`，不要为此修改全局 Git 配置。
+- SSH 密码只从环境变量 `CXL_SUFACE_GO_PWD` 获取；禁止把密码值写入仓库、命令记录或项目记忆。
+- 后续远程构建前先在远程目录确认 Git 状态，再执行 `make ac632n_rider_core_temp`；远程命令需按 Windows OpenSSH shell 语法处理路径。
+- 远程 checkout 可能落后本地提交；构建前还需比较 `git rev-parse --short HEAD`，不能用复用的旧对象或旧固件产物代表当前本地实现。

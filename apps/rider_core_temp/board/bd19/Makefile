@@ -123,6 +123,8 @@ INCLUDES := \
 	-I../../../../apps/common/third_party_profile/common \
 	-I../../../../apps/common/third_party_profile/jieli \
 	-I../../../../apps/common/third_party_profile/jieli/JL_rcsp \
+	-I../../../../apps/common/third_party_profile/jieli/JL_rcsp/bt_trans_data \
+	-I../../../../apps/common/third_party_profile/jieli/JL_rcsp/rcsp_updata \
 	-I../../../../apps/common/third_party_profile/jieli/gatt_common \
 	-I../../../../cpu/bd19 \
 	-I$(SYS_INC_DIR)

@@ -77,6 +77,12 @@ const char log_tag_const_d_RIDER_BOARD_DIAG AT(.LOG_TAG_CONST) = 0;
 const char log_tag_const_w_RIDER_BOARD_DIAG AT(.LOG_TAG_CONST) = 1;
 const char log_tag_const_e_RIDER_BOARD_DIAG AT(.LOG_TAG_CONST) = 1;
 
+const char log_tag_const_v_RIDER_POWER_KEY AT(.LOG_TAG_CONST) = 0;
+const char log_tag_const_i_RIDER_POWER_KEY AT(.LOG_TAG_CONST) = 1;
+const char log_tag_const_d_RIDER_POWER_KEY AT(.LOG_TAG_CONST) = 0;
+const char log_tag_const_w_RIDER_POWER_KEY AT(.LOG_TAG_CONST) = 1;
+const char log_tag_const_e_RIDER_POWER_KEY AT(.LOG_TAG_CONST) = 1;
+
 const char log_tag_const_v_AT_CMD AT(.LOG_TAG_CONST) = 0;
 const char log_tag_const_i_AT_CMD AT(.LOG_TAG_CONST) = 1;
 const char log_tag_const_d_AT_CMD AT(.LOG_TAG_CONST) = 1;
