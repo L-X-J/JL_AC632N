@@ -31,12 +31,16 @@
 //*********************************************************************************//
 /*
  * AC632_DevKitBoard V2.0 的 LED1/2/3 与 IOKey1/2 位于 J12 接口，必须用跳线
- * 分别连接到下面的 MCU GPIO。默认映射只使用 PB0/PB1/PB4/PB5/PB6，PB7 保留
- * 给 M601，PA0 保留给 UART0 TX。若你的底板跳线不同，只修改这些板级宏。
+ * 分别连接到下面的 MCU GPIO。默认映射只使用 PB0/PB1/PB3/PB4/PB5/PB6，PB7
+ * 保留给 M601，PA0 保留给 UART0 TX。若你的底板跳线不同，只修改这些板级宏。
  */
 #define RIDER_BOARD_DIAG_ENABLE              1
+#define RIDER_BOARD_POWER_KEY_PORT           IO_PORTB_03   // Rider 电源键，按下为低
+#define RIDER_BOARD_POWER_KEY_ACTIVE_LEVEL   0
+#define RIDER_BOARD_POWER_KEY_WAKEUP_INDEX   1            // wk_param.port[1]
+#define RIDER_BOARD_POWER_LED_PORT           IO_PORTB_05   // Rider 电源指示灯，PB5 高电平亮
 #define RIDER_BOARD_DIAG_LED1_PORT          IO_PORTB_06   // J12 LED1, 红色
-#define RIDER_BOARD_DIAG_LED2_PORT          IO_PORTB_05   // J12 LED2, 绿色
+#define RIDER_BOARD_DIAG_LED2_PORT          RIDER_BOARD_POWER_LED_PORT // J12 LED2, 绿色
 #define RIDER_BOARD_DIAG_LED3_PORT          IO_PORTB_04   // J12 LED3, 蓝色
 #define RIDER_BOARD_DIAG_IOKEY1_PORT        IO_PORTB_00   // J12 IOKey1, 按下为低
 #define RIDER_BOARD_DIAG_IOKEY2_PORT        IO_PORTB_01   // J12 IOKey2, 按下为低
@@ -140,7 +144,7 @@
 #define TCFG_SOFTOFF_WAKEUP_KEY_DRIVER_ENABLE       DISABLE_THIS_MOUDLE  //软关机唤醒按键不丢键使能, 目前只支持IOKEY
 
 //请根据board.c中的wakeup_param列表填写
-#define TCFG_WAKEUP_PORT_POWER_SRC          BIT(1)  //唤醒口port[1]
+#define TCFG_WAKEUP_PORT_POWER_SRC          BIT(RIDER_BOARD_POWER_KEY_WAKEUP_INDEX) // PB3, port[1]
 #define TCFG_WAKEUP_PORT_PREV_SRC           BIT(2)  //唤醒口port[2]
 #define TCFG_WAKEUP_PORT_NEXT_SRC           BIT(3)  //唤醒口port[3]
 
@@ -378,7 +382,7 @@
 #else
 #define TCFG_SYS_LVD_EN						      1   //电量检测使能
 #endif
-#define TCFG_POWER_ON_NEED_KEY				      0	  //是否需要按按键开机配置
+#define TCFG_POWER_ON_NEED_KEY				      0	  //Generic key driver disabled; Rider owns PB3 in modules/power
 #define TCFG_HID_AUTO_SHUTDOWN_TIME              (0 * 60)      //HID无操作自动关机(单位：秒)
 
 //*********************************************************************************//

@@ -35,6 +35,8 @@ static u8 rider_diag_last_temp_status = 0xff;
 static u8 rider_diag_last_temp_state = 0xff;
 static u8 rider_diag_last_core_state = 0xff;
 static u8 rider_diag_last_temp_freshness = 0xff;
+static u8 rider_diag_power_led_override;
+static u8 rider_diag_gpio_ready;
 
 /** Return whether a board mapping names a real AC632N GPIO. */
 static u8 rider_diag_port_valid(u32 port)
@@ -58,6 +60,16 @@ static void rider_diag_led_set(u32 port, u8 on)
 
 /** Turn off all diagnostic LEDs before a new pattern or shutdown. */
 static void rider_diag_leds_off(void)
+{
+    rider_diag_led_set(RIDER_BOARD_DIAG_LED1_PORT, 0);
+    if (!rider_diag_power_led_override) {
+        rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, 0);
+    }
+    rider_diag_led_set(RIDER_BOARD_DIAG_LED3_PORT, 0);
+}
+
+/** Force every LED off when the diagnostic owner itself is being stopped. */
+static void rider_diag_leds_off_force(void)
 {
     rider_diag_led_set(RIDER_BOARD_DIAG_LED1_PORT, 0);
     rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, 0);
@@ -161,7 +173,9 @@ static void rider_diag_render_led_test(void)
     if (step == 0) {
         rider_diag_led_set(RIDER_BOARD_DIAG_LED1_PORT, 1);
     } else if (step == 1) {
-        rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, 1);
+        if (!rider_diag_power_led_override) {
+            rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, 1);
+        }
     } else {
         rider_diag_led_set(RIDER_BOARD_DIAG_LED3_PORT, 1);
     }
@@ -186,26 +200,28 @@ static void rider_diag_render_status(const rider_temperature_snapshot_t *snapsho
     /* Green LED2 is solid only when both trusted skin and a fresh Core V1
      * candidate are being exported. Contact settling and five-minute model
      * warm-up blink, so skin trust is not confused with core readiness. */
-    if (snapshot && snapshot->skin_valid &&
-        snapshot->sensor_status == RIDER_TEMP_STATUS_OK &&
-        snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH &&
-        snapshot->core_state == RIDER_CORE_STATE_READY &&
-        snapshot->core_estimate_valid) {
-        rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, 1);
-    } else if (snapshot && snapshot->contact_valid &&
-               snapshot->sensor_status == RIDER_TEMP_STATUS_OK &&
-               snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH &&
-               (snapshot->temperature_state ==
-                    RIDER_TEMP_STATE_CONTACT_SETTLING ||
-                snapshot->temperature_state ==
-                    RIDER_TEMP_STATE_SKIN_TRUSTED ||
-                snapshot->temperature_state ==
-                    RIDER_TEMP_STATE_DETACH_SUSPECTED)) {
-        rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT,
-                           (rider_diag_tick_count % 10) < 5);
-    } else if (sensor_fault && snapshot->sensor_status == RIDER_TEMP_STATUS_NO_DEVICE) {
-        rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT,
-                           (rider_diag_tick_count % 4) < 2);
+    if (!rider_diag_power_led_override) {
+        if (snapshot && snapshot->skin_valid &&
+            snapshot->sensor_status == RIDER_TEMP_STATUS_OK &&
+            snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH &&
+            snapshot->core_state == RIDER_CORE_STATE_READY &&
+            snapshot->core_estimate_valid) {
+            rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, 1);
+        } else if (snapshot && snapshot->contact_valid &&
+                   snapshot->sensor_status == RIDER_TEMP_STATUS_OK &&
+                   snapshot->data_freshness == RIDER_TEMP_FRESHNESS_FRESH &&
+                   (snapshot->temperature_state ==
+                        RIDER_TEMP_STATE_CONTACT_SETTLING ||
+                    snapshot->temperature_state ==
+                        RIDER_TEMP_STATE_SKIN_TRUSTED ||
+                    snapshot->temperature_state ==
+                        RIDER_TEMP_STATE_DETACH_SUSPECTED)) {
+            rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT,
+                               (rider_diag_tick_count % 10) < 5);
+        } else if (sensor_fault && snapshot->sensor_status == RIDER_TEMP_STATUS_NO_DEVICE) {
+            rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT,
+                               (rider_diag_tick_count % 4) < 2);
+        }
     }
 
     /* Blue LED3 distinguishes CRC/range faults and button-2 state dumps. */
@@ -223,6 +239,31 @@ static void rider_diag_render_status(const rider_temperature_snapshot_t *snapsho
                (rider_diag_tick_count & 1)) {
         rider_diag_led_set(RIDER_BOARD_DIAG_LED3_PORT, 1);
     }
+}
+
+/** Give PB5 to the power-key state machine while leaving other diagnostics active. */
+void rider_board_diag_power_led_claim(uint8_t on)
+{
+    rider_diag_power_led_override = 1;
+    if (!rider_diag_gpio_ready) {
+        rider_diag_led_init(RIDER_BOARD_DIAG_LED2_PORT);
+        rider_diag_gpio_ready = 1;
+    }
+    rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, on);
+}
+
+/** Return PB5 to the diagnostic renderer and refresh its current temperature state. */
+void rider_board_diag_power_led_release(void)
+{
+    rider_temperature_snapshot_t snapshot;
+
+    rider_diag_power_led_override = 0;
+    if (!rider_diag_gpio_ready) {
+        rider_diag_led_set(RIDER_BOARD_DIAG_LED2_PORT, 0);
+        return;
+    }
+    rider_estimator_copy_snapshot(&snapshot);
+    rider_diag_render_status(&snapshot, rider_core_temp_ble_state());
 }
 
 /** Print the current sensor and BLE status on the requested button action. */
@@ -355,10 +396,13 @@ void rider_board_diag_init(void)
     rider_diag_last_temp_state = 0xff;
     rider_diag_last_core_state = 0xff;
     rider_diag_last_temp_freshness = 0xff;
+    rider_diag_power_led_override = 0;
+    rider_diag_gpio_ready = 0;
 
     rider_diag_led_init(RIDER_BOARD_DIAG_LED1_PORT);
     rider_diag_led_init(RIDER_BOARD_DIAG_LED2_PORT);
     rider_diag_led_init(RIDER_BOARD_DIAG_LED3_PORT);
+    rider_diag_gpio_ready = 1;
     rider_diag_key_init(RIDER_BOARD_DIAG_IOKEY1_PORT);
     rider_diag_key_init(RIDER_BOARD_DIAG_IOKEY2_PORT);
     log_info("init: J12 LED1=%u LED2=%u LED3=%u IOKey1=%u IOKey2=%u\n",
@@ -386,7 +430,9 @@ void rider_board_diag_stop(void)
         sys_timer_del(rider_diag_timer_id);
         rider_diag_timer_id = 0;
     }
-    rider_diag_leds_off();
+    rider_diag_power_led_override = 0;
+    rider_diag_leds_off_force();
+    rider_diag_gpio_ready = 0;
     for (index = 0; index < ARRAY_SIZE(ports); ++index) {
         if (rider_diag_port_valid(ports[index])) {
             gpio_set_pull_up(ports[index], 0);
@@ -405,6 +451,17 @@ void rider_board_diag_init(void)
 
 /** Keep the lifecycle contract link-safe when board diagnostics are disabled. */
 void rider_board_diag_stop(void)
+{
+}
+
+/** Keep the power-key LED contract link-safe when diagnostics are disabled. */
+void rider_board_diag_power_led_claim(uint8_t on)
+{
+    (void)on;
+}
+
+/** Keep the power-key LED contract link-safe when diagnostics are disabled. */
+void rider_board_diag_power_led_release(void)
 {
 }
 

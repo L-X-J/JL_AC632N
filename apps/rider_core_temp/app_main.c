@@ -7,7 +7,9 @@
 #include "btcontroller_modules.h"
 #include "btstack/avctp_user.h"
 #include "btstack/btstack_task.h"
+#include "rider_board_diag.h"
 #include "rider_core_temp.h"
+#include "rider_power_key.h"
 
 #define LOG_TAG_CONST       APP
 #define LOG_TAG             "[RIDER_APP]"
@@ -70,7 +72,9 @@ static void rider_app_start(void)
 /** Stop the BLE stack before the application instance is destroyed. */
 static void rider_app_stop(void)
 {
+    rider_power_key_stop();
     if (!rider_btstack_started) {
+        rider_board_diag_stop();
         return;
     }
 
@@ -138,6 +142,13 @@ void app_main(void)
     struct intent it;
 
     app_var_init();
+    rider_power_key_init();
+    rider_power_key_register_poweroff_prepare(rider_app_stop);
+    rider_board_diag_init();
+    if (!rider_power_key_startup_check()) {
+        return;
+    }
+    rider_power_key_start();
     init_intent(&it);
     it.name = "rider_core_temp";
     it.action = ACTION_RIDER_CORE_TEMP;

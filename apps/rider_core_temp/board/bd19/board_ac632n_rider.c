@@ -7,6 +7,7 @@
 #include "norflash.h"
 #include "user_cfg.h"
 #include "usb/otg.h"
+#include "rider_board_power.h"
 
 void usb1_iomode(u32 enable);
 
@@ -53,10 +54,32 @@ void debug_uart_init(const struct uart_platform_data *data)
 #endif
 }
 
-/** Rider has no physical power key; boot is controlled by the product board. */
+/** Configure PB3 as the active-low power key used by both wakeup and runtime scans. */
+static void rider_power_key_gpio_init(void)
+{
+    gpio_set_die(RIDER_BOARD_POWER_KEY_PORT, 1);
+    gpio_set_pull_down(RIDER_BOARD_POWER_KEY_PORT, 0);
+    gpio_set_pull_up(RIDER_BOARD_POWER_KEY_PORT, 1);
+    gpio_set_direction(RIDER_BOARD_POWER_KEY_PORT, 1);
+}
+
+/** Return the current physical PB3 level through the board adapter boundary. */
+uint8_t rider_board_power_key_pressed(void)
+{
+    return gpio_read(RIDER_BOARD_POWER_KEY_PORT) ==
+           RIDER_BOARD_POWER_KEY_ACTIVE_LEVEL;
+}
+
+/** Return whether the P33 wakeup source points at wk_param.port[1] (PB3). */
+uint8_t rider_board_power_key_wakeup(void)
+{
+    return (get_wakeup_source() & TCFG_WAKEUP_PORT_POWER_SRC) != 0;
+}
+
+/** Compatibility hook used by the generic SDK power-on path. */
 u8 get_power_on_status(void)
 {
-    return 0;
+    return rider_board_power_key_pressed();
 }
 
 /** Mark a port as owned by an active peripheral before high-impedance cleanup. */
@@ -73,6 +96,9 @@ static void rider_close_gpio(void)
 {
     u16 groups[3] = {0x1ff, 0x3ff, 0x3ff};
 
+    rider_protect_port(groups, RIDER_BOARD_POWER_KEY_PORT);
+    /* PB5 is also the product power LED; keep it out of generic GPIO cleanup. */
+    rider_protect_port(groups, RIDER_BOARD_POWER_LED_PORT);
     /* PB7 is deliberately excluded from the high-impedance mask. */
     rider_protect_port(groups, IO_PORTB_07);
 #if RIDER_BOARD_DIAG_ENABLE
@@ -124,8 +150,17 @@ static void rider_close_gpio(void)
     gpio_set_dieh(IO_PORT_DM1, 0);
 }
 
-/** No GPIO wake source is enabled for this always-on BLE sensor target. */
+/** PB3 is the sole digital wake source; other product ports retain their roles. */
+static const struct port_wakeup rider_power_key_wakeup = {
+    .pullup_down_enable = ENABLE,
+    .edge               = FALLING_EDGE,
+    .both_edge          = 0,
+    .filter             = PORT_FLT_2ms,
+    .iomap              = RIDER_BOARD_POWER_KEY_PORT,
+};
+
 const struct wakeup_param wk_param = {
+    .port[RIDER_BOARD_POWER_KEY_WAKEUP_INDEX] = &rider_power_key_wakeup,
 };
 
 /** Prepare the board for software power-off without touching PB7 ownership. */
@@ -152,6 +187,7 @@ void sleep_enter_callback(u8 step)
 void board_power_init(void)
 {
     power_init(&power_param);
+    rider_power_key_gpio_init();
     gpio_longpress_pin0_reset_config(IO_PORTA_09, 0, 0);
     gpio_shortpress_reset_config(0);
     power_set_callback(TCFG_LOWPOWER_LOWPOWER_SEL,

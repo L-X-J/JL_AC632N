@@ -46,6 +46,8 @@ Rider CoreTemp 的产品协议、温度算法、PB7 传感器适配和 AC632N �
 
 AC632N 开发板的 J12 是独立的 LED/按键接口，默认跳线映射由 `apps/rider_core_temp/board/bd19/board_ac632n_rider_cfg.h` 声明；PB7 永远归 M601 1-Wire，PA0 永远归 UART0 TX。修改 J12 映射时必须同步模块 README，并确认低功耗 GPIO 清理不会释放诊断端口。
 
+Rider CoreTemp 的电源手势属于应用产品逻辑，保留在 `apps/rider_core_temp/modules/power/rider_power_key.c`；`board/bd19` 只提供 PB3 当前电平、PB3 唤醒结果、GPIO 初始化和 `wk_param.port[1]` 映射。PB3 为低电平有效并使用下降沿唤醒，PB5 为高电平点亮的电源指示灯；`modules/diag/rider_board_diag.c` 通过明确的申请/释放接口仲裁 PB5，电源反馈期间诊断定时器不得覆盖它，释放后恢复温度显示。PB6/PB4、PB0/PB1 的 J12 诊断职责、PB7 的 M601 1-Wire 和 PA0 的 UART0 TX 不得因参考其他硬件文档而重新映射。附加 AB202X 文档只可作为行为及时序参考，不是本项目的板级硬件真相源。
+
 ## 代码复用与注释
 
 - 优先使用局部 helper，其次使用同一业务域内的复用；跨模块抽象必须有多个稳定使用点。

@@ -157,6 +157,7 @@ c_SRC_FILES := \
 	../../../../apps/common/third_party_profile/jieli/JL_rcsp/rcsp_updata/rcsp_ch_loader_download.c \
 	../../../../apps/common/third_party_profile/jieli/JL_rcsp/rcsp_updata/rcsp_user_update.c \
 	../../../../apps/rider_core_temp/modules/diag/rider_board_diag.c \
+	../../../../apps/rider_core_temp/modules/power/rider_power_key.c \
 	../../../../apps/rider_core_temp/modules/main/rider_core_temp_app.c \
 	../../../../apps/rider_core_temp/modules/system/rider_user_cfg.c \
 	../../../../apps/rider_core_temp/modules/temp/m601_1wire.c \

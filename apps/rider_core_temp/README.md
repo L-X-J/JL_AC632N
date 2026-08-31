@@ -15,6 +15,7 @@ apps/rider_core_temp/
   include/                           产品类型、配置和 GATT 句柄
   modules/bt/                        BLE 生命周期、GATT profile 和温度字节编码
   modules/diag/                      AC632N 板载 LED/按键诊断
+  modules/power/                     PB3 电源按键、PB5 电源灯状态机
   modules/main/                      温度采样调度与应用编排
   modules/system/                    产品身份和用户配置钩子
   modules/temp/                      PB7/M601 1-Wire 驱动、滤波与快照转换
@@ -36,6 +37,11 @@ PB7(IO_PORTB_07)
 J12（跳线接到 MCU GPIO）
   -> rider_board_diag.c: 按键去抖、BLE/温度状态采样
   -> LED 状态显示 + UART0 串口诊断
+
+PB3（低电平有效，内部上拉）
+  -> board_ac632n_rider.c: GPIO 电平、wk_param.port[1] 唤醒结果
+  -> rider_power_key.c: 开机确认、运行按键、软关机前置清理
+  -> PB5（高电平点亮）: 电源提示/按键反馈，结束后交还温度诊断
 ```
 
 应用启动后先清空传感器/估算器状态，再初始化 BLE common 和静态 GATT profile，避免重启时用上一会话快照构造广播；随后维持温度调度。M601 每个采样周期先发 `0xCC 0x44`，等待 15 ms，再发 `0xCC 0xBE` 读取 9 字节 scratchpad。一次转换或读取失败只发布无效快照，不阻塞 BLE 任务。
@@ -55,6 +61,8 @@ J12（跳线接到 MCU GPIO）
 
 按键为低电平有效，固件开启内部上拉；LED 由 GPIO 高电平点亮。默认映射刻意避开 PB7（M601 1-Wire）和 PA0（UART0 TX），不要把 J12 任一信号接到 PB7，也不要占用 PA0。若跳线改接其他 GPIO，只修改 `board/bd19/board_ac632n_rider_cfg.h` 中的 `RIDER_BOARD_DIAG_*_PORT` 宏，并重新烧录。
 
+PB3/PB5 属于产品电源接口；若生产板需要变更这两个端口，必须同时修改 `RIDER_BOARD_POWER_KEY_*`、`RIDER_BOARD_POWER_LED_PORT` 和 `wk_param.port[1]` 的板级契约，并重新核对低功耗 GPIO 保护。不要用 J12 诊断宏单独覆盖电源映射。
+
 如果实物没有装配 J12 但能找到 LED2 信号焊盘，可直接使用当前固件的既有映射：`PB6 -> LED2` 会让物理绿灯显示逻辑 LED1 的 BLE 状态，`PB5 -> LED2` 会让它显示逻辑 LED2 的 M601 状态。LED2 的 `510R` 限流电阻必须保留；不要把 PB7 或 PA0 接到 LED。具体替代接法和单灯配置见 [AC632_DevKitBoard V2.0 板卡说明](../../doc/datasheet/AC632N/AC632N开发板/AC632_DevKitBoard_V2.0_板卡说明.md)。
 
 LED 行为如下：
@@ -62,10 +70,35 @@ LED 行为如下：
 | 指示灯 | 含义 |
 |---|---|
 | LED1 红 | BLE 未启动熄灭；广播时慢闪；连接后常亮 |
-| LED2 绿 | 接触确认或 Core 五分钟预热时慢闪；可信皮温和 Core 候选都可导出时常亮；未检测到器件时快闪 |
+| LED2 绿（PB5） | 电源开机提示、运行按键反馈和关机快闪优先；空闲时显示接触/Core 状态，未检测到器件时快闪 |
 | LED3 蓝 | CRC 错误慢闪；物理范围/未佩戴双脉冲；IOKey2 打印状态时短暂闪烁 |
 
 IOKey1 按下会依次点亮三色灯完成约 1.2 秒自检；IOKey2 按下会输出一次 BLE/温度快照，不改变 BLE 协议状态。未接跳线的按键应保持释放状态。
+
+## PB3 按键和 PB5 电源指示灯
+
+Rider 的 PB3/PB5 是产品电源接口，不是从附加 AB202X 文档复制的硬件映射。PB3 由外部按键接地，按下为低电平；板级代码开启内部上拉，并把它登记为 BD19 `wk_param.port[1]` 的下降沿唤醒源。PB5 为高电平点亮，当前也对应 J12 的 LED2，因此温度诊断仍可使用同一物理灯，但必须经过电源状态机的仲裁。
+
+| 信号 | MCU 端口 | 所有权和行为 |
+|---|---|---|
+| Rider 电源按键 | PB3 | 低电平有效；关机时下降沿唤醒，运行时由 `modules/power/rider_power_key.c` 每 5 ms 扫描 |
+| Rider 电源指示灯 | PB5 | 高电平点亮；开机提示、按键反馈和关机快闪期间由电源状态机独占 |
+| J12 LED1/LED3 | PB6/PB4 | 继续显示 BLE 或传感器诊断，不受 PB5 电源灯仲裁影响 |
+| J12 IOKey1/IOKey2 | PB0/PB1 | 继续执行 LED 自检和状态输出 |
+| M601 1-Wire | PB7 | 继续由 `modules/temp/m601_1wire.c` 独占，不参与电源逻辑 |
+| UART0 TX | PA0 | 继续输出串口诊断，不参与电源逻辑 |
+
+行为和状态边界如下：
+
+- 关机唤醒后，PB3 必须持续按下 2 秒；不足 2 秒松开时 PB5 保持熄灭并回到软关机。
+- 确认开机后 PB5 长亮 2 秒；复位、上电和其他非 PB3 唤醒也执行一次同样的 2 秒开机提示。
+- 触发开机确认的原始长按会被隔离，提示结束前后都不会直接转成关机；只有松开 PB3 后，下一次持续按住 2 秒才会进入关机模式。
+- 运行态短按只在按下期间点亮 PB5，松开后释放覆盖并立即恢复当前温度诊断显示。
+- 运行态持续按住 2 秒后锁定关机模式，PB5 执行 3 次“灭 100 ms、亮 100 ms”，共 6 个阶段；快闪期间按键不能重新点灯或重复触发，随后先停止 BLE/GATT、M601 调度和诊断定时器，再调用 `power_set_soft_poweroff()`。
+
+PB5 的覆盖是临时优先级规则：`rider_board_diag_power_led_claim()` 申请后，诊断定时器仍可更新 PB6/PB4，但不得写 PB5；`rider_board_diag_power_led_release()` 释放后由诊断模块重新渲染温度状态。现有 GATT UUID、帧长度和字段不因按键/指示灯逻辑改变。
+
+该节的行为及时序参考附加 AB202X 文档；附加文档不属于本项目板级配置，不能改变 PB7、PA0 或 J12 的现有映射。
 
 ## BLE 服务和句柄
 
@@ -156,22 +189,7 @@ PB7 (`IO_PORTB_07`) 由 M601 1-Wire 总线独占：
 
 ## 串口诊断日志
 
-板级 UART0 调试输出为 `IO_PORTA_00`（PA0，TX）、`1000000 baud`、8N1。使用 USB-UART 转接器时，将转接器 RX 接 PA0、GND 共地。日志通过现有 `log_info`/`put_buf` 路径输出，重点前缀如下：
-
-- `[RIDER_TEMP]`：M601 presence、转换启动、9 字节 scratchpad、CRC 期望值/收到值、原始温度和状态。
-- `[RIDER_ESTIMATOR]`：Sensor/Skin/Core 来源序号、三路温度、皮温与 Core 状态、5 分钟历史、基线、1/5 分钟变化、模型版本/模式、心率是否实际采用和发布资格。
-- `[RIDER_GATT]`：ATT 读/写、CCCD、CORE/HTS 读值和通知帧、广播主包与扫描响应原始字节。
-
-串口中 `ble=0/1/2` 分别表示未启动、广播、已连接；`sensor_seq/skin_seq/core_seq` 可把三条时间线按来源样本对齐，`32767` 表示该时间线当前无值。`contact_samples` 从 0 累加到 30，用于可信皮温门控；`typical` 是连续 `32~40°C` 证据计数，不会提前解锁可信皮温；`history_s` 从 0 累加到 300，用于 Core V1 预热。皮温状态 `0/1/2/3/4/5` 分别为 `NO_DEVICE/NOT_WORN/CONTACT_SETTLING/SKIN_TRUSTED/DETACH_SUSPECTED/STALE`；Core 状态 `0/1/2/3/4` 分别为 `EMPTY/WARMUP/READY/HOLD/INVALID`。`model=v1/0` 是 Skin-only，`model=v1/1` 是 Skin+HR；`hr_used=1` 才表示该次候选使用了心率。无效温度不会伪装成 `0°C`。若持续出现 `status=2`，应优先核对 M601 CRC 多项式和 PB7 上拉/时序；若持续出现 `status=1`，应核对 PB7 连线、外部上拉和传感器供电；若持续出现 `status=4`，应确认传感器贴合位置并按实际佩戴曲线校准区间。
-
-单 M601 核心估算的离线拟合、连续留出时段验证和 `<=0.5°C` 误差门槛见 [`单M601温度算法研究与验证.md`](../../doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md)。当前板级使用 `EXPERIMENTAL` 是为了采集真实场景数据，不代表模型已经通过验证；完成标定和门槛审查后再切换 `STRICT`，不要把实验候选误称为医疗核心体温。
-
-标定 CSV 至少提供 `timestamp`、可信皮温、参考核心温度和可信状态；可选提供 `heart_rate`、`heart_rate_valid`、参考皮温与 `session_id`。如果包含多次实验，应按完整时段留出，例如
-`python3 tools/rider_core_temp_calibrate.py samples.csv --holdout-session exercise`；这会避免同一运动时段同时出现在拟合集和验证集。滤波状态机和标定工具的主机回归统一运行：
-
-```sh
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p 'test_*.py'
-```
+串口脚位、终端参数、波特率分频、ASCII 日志约束、字段说明和排障顺序见独立文档：[Rider CoreTemp 调试说明](./DEBUG.md)。
 
 ## 构建和验证
 
