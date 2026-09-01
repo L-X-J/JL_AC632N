@@ -9,6 +9,10 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MAKEFILE = ROOT / "apps/rider_core_temp/board/bd19/Makefile"
 BOARD_CONFIG = ROOT / "apps/rider_core_temp/board/bd19/board_ac632n_rider_cfg.h"
+GLOBAL_BUILD_CONFIG = (
+    ROOT
+    / "apps/rider_core_temp/board/bd19/board_ac632n_rider_global_build_cfg.h"
+)
 DEBUG_DOC = ROOT / "apps/rider_core_temp/DEBUG.md"
 UART_CLOCK_HZ = 24_000_000
 UART_BAUDRATE = 115_200
@@ -147,6 +151,15 @@ class RiderSerialContractTests(unittest.TestCase):
         self.assertRegex(config, r"#define\s+TCFG_UART0_RX_PORT\s+NO_CONFIG_PORT")
         self.assertRegex(config, r"#define\s+TCFG_UART0_BAUDRATE\s+115200\b")
 
+    def test_boot_debug_matches_application_uart(self):
+        """Keep boot/OTA and application diagnostics on PA0 at 115200."""
+        config = GLOBAL_BUILD_CONFIG.read_text(encoding="utf-8")
+        self.assertRegex(config, r"#define\s+CONFIG_UBOOT_DEBUG_PIN\s+PA00\b")
+        self.assertRegex(
+            config,
+            r"#define\s+CONFIG_UBOOT_DEBUG_BAUD_RATE\s+115200\b",
+        )
+
     def test_uart_divider_is_within_tolerance(self):
         """Check the SDK UART divider math stays within normal UART tolerance."""
         divider = ((UART_CLOCK_HZ + UART_BAUDRATE // 2) // UART_BAUDRATE) // 4 - 1
@@ -160,6 +173,7 @@ class RiderSerialContractTests(unittest.TestCase):
         document = DEBUG_DOC.read_text(encoding="utf-8")
         self.assertIn("PA0", document)
         self.assertIn("115200 / 8N1", document)
+        self.assertIn("boot/OTA", document)
         self.assertIn("必须重新编译并烧录固件", document)
 
     def test_non_ascii_literal_scanner_catches_escaped_values(self):

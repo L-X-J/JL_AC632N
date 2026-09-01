@@ -45,7 +45,7 @@ AC63 系列通用蓝牙SDK 固件程序
 
 * 蓝牙应用 : [SPP_LE](./apps/spp_and_le), 适用领域：透传, 数传, 扫描设备, 广播设备, 信标, FindMy应用, 多机连接. Dongle(usb / bt). [文档链接](https://doc.zh-jieli.com/AC63/zh-cn/master/module_demo/spple/index.html)
 
-* 蓝牙应用 : [Rider CoreTemp](./apps/rider_core_temp)，AC632N 单 BLE 外设，用于 PB7 上的 M601 温度采集和 CORE 兼容协议广播；UART0 调试输出固定为 `PA0 / 115200 8N1`，接线和 ASCII 日志约束见 [Rider CoreTemp 调试说明](./apps/rider_core_temp/DEBUG.md)。
+* 蓝牙应用 : [Rider CoreTemp](./apps/rider_core_temp)，AC632N 单 BLE 外设，用于 PB7 上的 M601 温度采集和 CORE 兼容协议广播；boot/OTA 与应用 UART0 调试输出统一为 `PA0 / 115200 8N1`，接线和 ASCII 日志约束见 [Rider CoreTemp 调试说明](./apps/rider_core_temp/DEBUG.md)。
 
   Rider 板级电源接口固定为 `PB3` 低电平有效按键和 `PB5` 高电平点亮指示灯；PB5 的电源反馈优先于温度诊断显示，反馈结束后恢复诊断状态。`PB7` 继续独占 M601 1-Wire，`PA0` 继续作为 UART0 TX，J12 的 PB6/PB4 与 PB0/PB1 映射不变。
 

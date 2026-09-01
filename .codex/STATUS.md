@@ -1,10 +1,10 @@
 # Project Status
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 ## Current Focus
 
-Rider UART serial diagnostics: standardize UART0 at 115200 and verify the flashed image and PA0 wiring.
+Rider UART serial diagnostics: unify boot/OTA and application output on PA0 at 115200, then verify the flashed image.
 
 ## In Progress
 
@@ -25,10 +25,12 @@ None.
 - Fixed the Rider board Makefile RCSP subdirectory include paths and added the missing `RIDER_POWER_KEY` log constants.
 - Synchronized the local Rider power/board/configuration files to the remote checkout and forced `LINK_AT=0` compile/link; `sdk.elf` completed successfully, with only q32s stack-size warnings.
 - Changed the Rider UART0 debug contract from `1000000` to the standard `115200` baud (8N1); documented the screenshot garbled-byte failure mode and the required rebuild/flash step.
+- Found the remaining boot/OTA post-build default at `PA5 / 1000000` and overrode it for Rider so every diagnostic stage uses `PA0 / 115200`.
+- Rebuilt and linked the Rider target on the Windows q32s host; regenerated `sdk.elf`, `app.bin`, `jl_isd.fw` and `update.ufw`, and verified the generated `isd_config.ini` contains `UTTX=PA00` and `UTBD=115200`.
 
 ## Next
 
-- After the user confirms the board is in Update mode, build/flash the image containing the 115200 UART change, then verify readable ASCII startup and temperature logs.
+- After the user confirms the board is in Update mode, flash the already-built image containing the unified PA0/115200 settings, then verify readable boot and ASCII application logs.
 
 ## Blockers
 
