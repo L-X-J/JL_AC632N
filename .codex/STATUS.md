@@ -4,7 +4,7 @@ Last updated: 2026-09-01
 
 ## Current Focus
 
-Rider firmware traceability: identify the flashed image through the PA0/115200 startup version log and BLE Firmware Revision.
+Rider firmware traceability and BLE OTA channel validation for the `0.1.2` image.
 
 ## In Progress
 
@@ -26,6 +26,7 @@ None.
 - Synchronized the local Rider power/board/configuration files to the remote checkout and forced `LINK_AT=0` compile/link; `sdk.elf` completed successfully, with only q32s stack-size warnings.
 - Changed the Rider UART0 debug contract from `1000000` to the standard `115200` baud (8N1); documented the screenshot garbled-byte failure mode and the required rebuild/flash step.
 - Found the remaining boot/OTA post-build default at `PA5 / 1000000` and overrode it for Rider so every diagnostic stage uses `PA0 / 115200`.
+- Enabled the Rider bd19 RCSP BLE OTA channel with `CONFIG_APP_OTA_ENABLE=1`; the profile remains single-bank and the debug mini-program still does not transmit firmware.
 - Rebuilt and linked the Rider target on the Windows q32s host; regenerated `sdk.elf`, `app.bin`, `jl_isd.fw` and `update.ufw`, and verified the generated `isd_config.ini` contains `UTTX=PA00` and `UTBD=115200`.
 - Set the user-authoritative firmware baseline to `0.1.0`, bumped this change to `0.1.1`, and made startup UART plus BLE `0x2A26` expose the same version macro.
 - Fast-forwarded the Windows build checkout to `fd8d380`, completed the q32s link/package, and verified the generated `app.bin` contains both the `RIDER_APP` firmware-version format and `0.1.1`; `isd_config.ini` remains `PA00 / 115200`.
@@ -33,12 +34,12 @@ None.
 
 ## Next
 
-- Build and flash the `0.1.1` image, then verify `Firmware version: 0.1.1` over PA0/115200 and read the same value from BLE `0x2A26`.
+- Build and flash the `0.1.2` image, verify `Firmware version: 0.1.2` over PA0/115200, read the same value from BLE `0x2A26`, and validate RCSP `AE00/AE01/AE02` discovery and OTA flow with a compatible client.
 
 ## Blockers
 
 - Local q32s compiler/linker tools are unavailable.
-- The `0.1.1` image has been built with q32s, but the Windows download device was offline and the image has not yet been flashed on hardware.
+- The previous `0.1.1` image was built with q32s, but the Windows download device was offline and the new `0.1.2` OTA-enabled image has not yet been built or flashed on hardware.
 
 ## Relevant Files
 

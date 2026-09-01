@@ -28,4 +28,4 @@ rider_core_temp_debug/
 
 ## OTA 说明
 
-当前 Rider 默认 `CONFIG_APP_OTA_ENABLE=0`，不会出现 RCSP 服务。小程序可以探测 AE00 通道并展示能力状态，但所有写入路径（包括 `sendPacket()` 和 `upload()`）都保持拒绝，避免在没有认证、ACK、文件信息和回滚验证的情况下误烧固件。只有打开 OTA 宏并完成硬件验收后，才应在该适配器中补齐 E1-E7 命令状态机。
+当前 Rider 板级配置为 `CONFIG_APP_OTA_ENABLE=1`，固件会提供 RCSP `AE00/AE01/AE02` 服务。小程序可以探测并订阅 AE00 通道，但所有写入路径（包括 `sendPacket()` 和 `upload()`）仍保持拒绝；认证、文件信息、分块 ACK、校验和及重启流程完成前，不应通过该调试台发送固件。E1-E7 命令状态机需要单独完成协议和硬件验收。

@@ -43,9 +43,9 @@ function chunk(bytes, size) {
 }
 
 /**
- * RCSP transport adapter. The current Rider image deliberately leaves
- * CONFIG_APP_OTA_ENABLE off, so this class reports capability honestly and
- * only exposes packet framing for a separately certified OTA build.
+ * RCSP transport adapter. The Rider board profile exposes the RCSP service,
+ * but this adapter only probes the channel until its OTA state machine is
+ * separately certified.
  */
 class RiderRcspOta {
   constructor(ble) {
@@ -54,7 +54,7 @@ class RiderRcspOta {
     this.writeCharacteristicId = '';
     this.notifyCharacteristicId = '';
     this.available = false;
-    this.reason = '当前固件未启用 RCSP OTA';
+    this.reason = '尚未检查 RCSP OTA 通道';
     this.onProgress = null;
     this.onResponse = null;
   }
@@ -71,7 +71,7 @@ class RiderRcspOta {
           const service = (serviceResult.services || []).find((item) => sameUuid(item.uuid, RCSP.serviceUuid));
           if (!service) {
             this.available = false;
-            this.reason = '未发现 RCSP AE00 服务（当前 Rider profile 未编译 OTA）';
+            this.reason = '未发现 RCSP AE00 服务（请确认已刷入 CONFIG_APP_OTA_ENABLE=1 的 Rider 固件）';
             resolve(false);
             return;
           }
@@ -97,7 +97,7 @@ class RiderRcspOta {
                 state: true,
                 success: () => {
                   this.available = true;
-                  this.reason = '已发现 RCSP 通道；仍需认证过的 Rider OTA 固件';
+                  this.reason = '已发现 RCSP 通道；当前小程序传输状态机尚未认证';
                   resolve(true);
                 },
                 fail: (error) => reject(error),
@@ -121,7 +121,7 @@ class RiderRcspOta {
    * RCSP requires device authentication, file metadata and command ACKs.
    */
   async upload() {
-    throw new Error('OTA 传输尚未认证：请先打开 Rider CONFIG_APP_OTA_ENABLE 并完成 RCSP ACK 流程');
+    throw new Error('OTA 传输尚未认证：当前小程序尚未实现 RCSP 认证、文件信息、ACK 和重启流程');
   }
 }
 

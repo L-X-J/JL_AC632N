@@ -26,7 +26,7 @@ Page({
     latest: null,
     rawHex: '',
     error: '',
-    otaText: '当前固件未启用 OTA',
+    otaText: 'OTA 通道尚未检查',
     otaAvailable: false,
     shownRecordCount: 0,
   },
@@ -90,7 +90,7 @@ Page({
       updates.connected = false;
       updates.collecting = false;
       updates.otaAvailable = false;
-      updates.otaText = '当前固件未启用 OTA';
+      updates.otaText = 'OTA 通道尚未检查';
       updates.statusText = '未连接';
     } else if (state === 'error') {
       updates.connected = false;

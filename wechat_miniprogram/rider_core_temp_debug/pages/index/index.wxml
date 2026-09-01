@@ -62,5 +62,5 @@
   <view class="section-heading"><text>固件升级</text><text class="muted">RCSP / 实验</text></view>
   <view class="ota-row"><text class="ota-copy">{{otaText}}</text><button class="secondary" bindtap="probeOta" disabled="{{!connected}}">检查通道</button></view>
   <button class="ota-button" bindtap="chooseFirmware" disabled="{{!otaAvailable}}">选择固件文件</button>
-  <view class="ota-warning">当前 Rider 板级配置 CONFIG_APP_OTA_ENABLE=0。小程序保留 AE00/AE01/AE02 探测和分包适配，但不会在未认证的固件上发送升级数据。</view>
+  <view class="ota-warning">当前 Rider 固件已编译 CONFIG_APP_OTA_ENABLE=1 并提供 AE00/AE01/AE02。小程序目前只探测通道，不发送固件。</view>
 </view>

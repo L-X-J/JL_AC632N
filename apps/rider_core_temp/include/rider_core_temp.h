@@ -303,6 +303,6 @@ int bt_comm_ble_hci_event_handler(struct bt_event *bt);
 #define RIDER_CORE_TEMP_NAME "ICXL-RTemp"
 #define RIDER_CORE_TEMP_MANUFACTURER "ICXL"
 #define RIDER_CORE_TEMP_MODEL "CoreTemp-Rider"
-#define RIDER_CORE_TEMP_FIRMWARE_VERSION "0.1.1"
+#define RIDER_CORE_TEMP_FIRMWARE_VERSION "0.1.2"
 
 #endif
