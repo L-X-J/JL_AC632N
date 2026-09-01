@@ -11,7 +11,7 @@
 #include "rider_core_temp.h"
 #include "rider_power_key.h"
 
-#define LOG_TAG_CONST       APP
+#define LOG_TAG_CONST       RIDER_APP
 #define LOG_TAG             "[RIDER_APP]"
 #define LOG_ERROR_ENABLE
 #define LOG_DEBUG_ENABLE
@@ -63,6 +63,7 @@ static void rider_app_start(void)
     }
 
     rider_btstack_started = 1;
+    log_info("Firmware version: %s\n", RIDER_CORE_TEMP_FIRMWARE_VERSION);
     clk_set("sys", BT_NORMAL_HZ);
     bt_pll_para(TCFG_CLOCK_OSC_HZ, clk_get("sys"), 0, 0);
     btstack_ble_start_before_init(&rider_ble_config, 0);

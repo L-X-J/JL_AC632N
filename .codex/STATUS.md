@@ -4,7 +4,7 @@ Last updated: 2026-09-01
 
 ## Current Focus
 
-Rider UART serial diagnostics: unify boot/OTA and application output on PA0 at 115200, then verify the flashed image.
+Rider firmware traceability: identify the flashed image through the PA0/115200 startup version log and BLE Firmware Revision.
 
 ## In Progress
 
@@ -27,15 +27,16 @@ None.
 - Changed the Rider UART0 debug contract from `1000000` to the standard `115200` baud (8N1); documented the screenshot garbled-byte failure mode and the required rebuild/flash step.
 - Found the remaining boot/OTA post-build default at `PA5 / 1000000` and overrode it for Rider so every diagnostic stage uses `PA0 / 115200`.
 - Rebuilt and linked the Rider target on the Windows q32s host; regenerated `sdk.elf`, `app.bin`, `jl_isd.fw` and `update.ufw`, and verified the generated `isd_config.ini` contains `UTTX=PA00` and `UTBD=115200`.
+- Set the user-authoritative firmware baseline to `0.1.0`, bumped this change to `0.1.1`, and made startup UART plus BLE `0x2A26` expose the same version macro.
 
 ## Next
 
-- After the user confirms the board is in Update mode, flash the already-built image containing the unified PA0/115200 settings, then verify readable boot and ASCII application logs.
+- Build and flash the `0.1.1` image, then verify `Firmware version: 0.1.1` over PA0/115200 and read the same value from BLE `0x2A26`.
 
 ## Blockers
 
 - Local q32s compiler/linker tools are unavailable.
-- Flashing the newly linked image is paused until the user confirms `Update` mode.
+- The `0.1.1` change passes the host code-model build, but has not yet been built with q32s or flashed on hardware.
 
 ## Relevant Files
 

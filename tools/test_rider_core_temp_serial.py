@@ -9,6 +9,12 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MAKEFILE = ROOT / "apps/rider_core_temp/board/bd19/Makefile"
 BOARD_CONFIG = ROOT / "apps/rider_core_temp/board/bd19/board_ac632n_rider_cfg.h"
+FIRMWARE_HEADER = ROOT / "apps/rider_core_temp/include/rider_core_temp.h"
+APP_MAIN = ROOT / "apps/rider_core_temp/app_main.c"
+GATT_SOURCE = ROOT / "apps/rider_core_temp/modules/bt/core_temp_gatt.c"
+LOG_CONFIG = ROOT / "apps/rider_core_temp/config/log_config.c"
+MODULE_README = ROOT / "apps/rider_core_temp/README.md"
+ALGORITHM_DOC = ROOT / "doc/ICXL-CoreTemp-Ride/单M601温度算法研究与验证.md"
 GLOBAL_BUILD_CONFIG = (
     ROOT
     / "apps/rider_core_temp/board/bd19/board_ac632n_rider_global_build_cfg.h"
@@ -142,7 +148,63 @@ def _non_ascii_string_lines(source):
     return _non_ascii_string_lines_from_bytes(source.read_bytes())
 
 
+def _firmware_version():
+    """Read the Rider product version from its single source of truth."""
+    header = FIRMWARE_HEADER.read_text(encoding="utf-8")
+    match = re.search(
+        r'^#define\s+RIDER_CORE_TEMP_FIRMWARE_VERSION\s+"([^"]+)"\s*$',
+        header,
+        re.MULTILINE,
+    )
+    if not match:
+        raise AssertionError("RIDER_CORE_TEMP_FIRMWARE_VERSION is missing")
+    return match.group(1)
+
+
 class RiderSerialContractTests(unittest.TestCase):
+    def test_firmware_version_contract(self):
+        """Keep startup, GATT and maintained documents on one SemVer value."""
+        version = _firmware_version()
+        self.assertRegex(version, r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+
+        app_main = APP_MAIN.read_text(encoding="utf-8")
+        self.assertRegex(app_main, r"#define\s+LOG_TAG_CONST\s+RIDER_APP\b")
+        self.assertRegex(
+            app_main,
+            r'log_info\("Firmware version: %s\\n",\s*'
+            r'RIDER_CORE_TEMP_FIRMWARE_VERSION\s*\);',
+        )
+
+        log_config = LOG_CONFIG.read_text(encoding="utf-8")
+        self.assertRegex(
+            log_config,
+            r"const\s+char\s+log_tag_const_i_RIDER_APP\s+"
+            r"AT\(\.LOG_TAG_CONST\)\s*=\s*1\s*;",
+        )
+
+        gatt_source = GATT_SOURCE.read_text(encoding="utf-8")
+        firmware_case = re.search(
+            r"case\s+RIDER_ATT_FIRMWARE_VALUE_HANDLE:(.*?)case\s+",
+            gatt_source,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(firmware_case)
+        self.assertIn("RIDER_CORE_TEMP_FIRMWARE_VERSION", firmware_case.group(1))
+
+        expected_revision = rf"Firmware Revision(?:\s+为)?\s+`{re.escape(version)}`"
+        self.assertRegex(
+            MODULE_README.read_text(encoding="utf-8"),
+            expected_revision,
+        )
+        self.assertRegex(
+            ALGORITHM_DOC.read_text(encoding="utf-8"),
+            expected_revision,
+        )
+
+        debug_document = DEBUG_DOC.read_text(encoding="utf-8")
+        self.assertIn(f"Firmware version: {version}", debug_document)
+        self.assertIn(f"其值也必须是 `{version}`", debug_document)
+
     def test_uart_configuration(self):
         """Keep the documented PA0 115200 8N1 debug contract stable."""
         config = BOARD_CONFIG.read_text(encoding="utf-8")

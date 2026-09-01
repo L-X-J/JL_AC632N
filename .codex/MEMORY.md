@@ -23,6 +23,7 @@
 - 固件入口是根级 Makefile/板级 Makefile；CMake 只用于 CLion 代码模型。
 - 新增 Rider 业务能力先放入 `apps/rider_core_temp`，只有多个应用稳定共享时才考虑公共组件。
 - 外部 AB202X 文档只作为按键/LED 行为及时序参考，不作为本项目硬件映射真相源。
+- Rider 产品固件版本以 `apps/rider_core_temp/include/rider_core_temp.h` 的 `RIDER_CORE_TEMP_FIRMWARE_VERSION` 为唯一真相源。任何包含 Rider 固件源码、板级配置或固件构建配置的推送，都必须先递增 SemVer，并同步模块 README、调试说明和算法记录；启动串口日志与 BLE `0x2A26` 直接引用该宏，用于确认实际烧录版本。
 
 ## Remote Build Environment
 

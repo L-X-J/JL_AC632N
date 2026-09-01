@@ -59,6 +59,12 @@ const char log_tag_const_d_APP AT(.LOG_TAG_CONST) = 1;
 const char log_tag_const_w_APP AT(.LOG_TAG_CONST) = 1;
 const char log_tag_const_e_APP AT(.LOG_TAG_CONST) = 1;
 
+const char log_tag_const_v_RIDER_APP AT(.LOG_TAG_CONST) = 0;
+const char log_tag_const_i_RIDER_APP AT(.LOG_TAG_CONST) = 1;
+const char log_tag_const_d_RIDER_APP AT(.LOG_TAG_CONST) = 1;
+const char log_tag_const_w_RIDER_APP AT(.LOG_TAG_CONST) = 1;
+const char log_tag_const_e_RIDER_APP AT(.LOG_TAG_CONST) = 1;
+
 const char log_tag_const_v_RIDER_TEMP AT(.LOG_TAG_CONST) = 0;
 const char log_tag_const_i_RIDER_TEMP AT(.LOG_TAG_CONST) = 1;
 const char log_tag_const_d_RIDER_TEMP AT(.LOG_TAG_CONST) = 0;

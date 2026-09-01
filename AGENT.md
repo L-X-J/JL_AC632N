@@ -48,6 +48,8 @@ AC632N 开发板的 J12 是独立的 LED/按键接口，默认跳线映射由 `a
 
 Rider CoreTemp 的电源手势属于应用产品逻辑，保留在 `apps/rider_core_temp/modules/power/rider_power_key.c`；`board/bd19` 只提供 PB3 当前电平、PB3 唤醒结果、GPIO 初始化和 `wk_param.port[1]` 映射。PB3 为低电平有效并使用下降沿唤醒，PB5 为高电平点亮的电源指示灯；`modules/diag/rider_board_diag.c` 通过明确的申请/释放接口仲裁 PB5，电源反馈期间诊断定时器不得覆盖它，释放后恢复温度显示。PB6/PB4、PB0/PB1 的 J12 诊断职责、PB7 的 M601 1-Wire 和 PA0 的 UART0 TX 不得因参考其他硬件文档而重新映射。附加 AB202X 文档只可作为行为及时序参考，不是本项目的板级硬件真相源。
 
+Rider 产品固件版本的唯一真相源是 `apps/rider_core_temp/include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`，格式必须为 SemVer。任何包含 Rider 固件源码、板级配置或固件构建配置的推送，必须在推送前递增该版本（至少递增 patch，或按变更语义提升 minor/major），且不得复用已经烧录过的版本号；启动串口日志和 BLE Device Information `0x2A26` 必须直接引用该宏，不得复制独立版本常量。版本变化必须同步 Rider 模块说明、调试说明和算法记录。
+
 ## 代码复用与注释
 
 - 优先使用局部 helper，其次使用同一业务域内的复用；跨模块抽象必须有多个稳定使用点。
