@@ -28,6 +28,8 @@ None.
 - Found the remaining boot/OTA post-build default at `PA5 / 1000000` and overrode it for Rider so every diagnostic stage uses `PA0 / 115200`.
 - Rebuilt and linked the Rider target on the Windows q32s host; regenerated `sdk.elf`, `app.bin`, `jl_isd.fw` and `update.ufw`, and verified the generated `isd_config.ini` contains `UTTX=PA00` and `UTBD=115200`.
 - Set the user-authoritative firmware baseline to `0.1.0`, bumped this change to `0.1.1`, and made startup UART plus BLE `0x2A26` expose the same version macro.
+- Fast-forwarded the Windows build checkout to `fd8d380`, completed the q32s link/package, and verified the generated `app.bin` contains both the `RIDER_APP` firmware-version format and `0.1.1`; `isd_config.ini` remains `PA00 / 115200`.
+- The post-build downloader reported `Device offline, only package the file`, so this run generated `sdk.elf`, `app.bin` and `jl_isd.fw` but did not flash the board.
 
 ## Next
 
@@ -36,7 +38,7 @@ None.
 ## Blockers
 
 - Local q32s compiler/linker tools are unavailable.
-- The `0.1.1` change passes the host code-model build, but has not yet been built with q32s or flashed on hardware.
+- The `0.1.1` image has been built with q32s, but the Windows download device was offline and the image has not yet been flashed on hardware.
 
 ## Relevant Files
 
