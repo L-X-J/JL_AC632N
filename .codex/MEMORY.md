@@ -31,5 +31,7 @@
 - 远程 q32s 工具链位于 `C:\JL\pi32\bin`；项目自带 Make 位于 `C:\Documents and Settings\pc\My Documents\JL_AC632N\tools\utils\make.exe`，可通过 Windows 路径别名访问同一项目。
 - SSH 登录用户与项目目录所有者不同，远程 Git 检查需使用一次性的 `git -c safe.directory=C:/Users/pc/Documents/JL_AC632N status --short`，不要为此修改全局 Git 配置。
 - SSH 密码只从环境变量 `CXL_SUFACE_GO_PWD` 获取；禁止把密码值写入仓库、命令记录或项目记忆。
+- 当前 macOS checkout 是受跟踪源码的主工作区；Windows checkout 默认只用于构建、打包和烧录，不通过 SCP 覆盖或直接编辑受跟踪源码。
+- 如果确需在 Windows checkout 修改受跟踪代码，必须先在 Windows 形成提交并推送该提交，再由当前工作区执行 pull/fetch 并合并；不得让 Windows 留有未提交源码差异。Windows 登录用户没有 GitHub 凭据时，只传递 Git commit/bundle，由有凭据的当前工作区代为推送，禁止退回到复制源码文件。
 - 后续远程构建前先在远程目录确认 Git 状态，再执行 `make ac632n_rider_core_temp`；远程命令需按 Windows OpenSSH shell 语法处理路径。
 - 远程 checkout 可能落后本地提交；构建前还需比较 `git rev-parse --short HEAD`，不能用复用的旧对象或旧固件产物代表当前本地实现。
