@@ -4,7 +4,7 @@ Last updated: 2026-09-01
 
 ## Current Focus
 
-Rider firmware traceability and BLE OTA channel validation for the `0.1.2` image.
+Rider firmware startup recovery and BLE OTA channel validation for the `0.1.3` image.
 
 ## In Progress
 
@@ -34,12 +34,12 @@ None.
 
 ## Next
 
-- Build and flash the `0.1.2` image, verify `Firmware version: 0.1.2` over PA0/115200, read the same value from BLE `0x2A26`, and validate RCSP `AE00/AE01/AE02` discovery and OTA flow with a compatible client.
+- Build and flash the `0.1.3` image, verify `Firmware version: 0.1.3` over PA0/115200, read the same value from BLE `0x2A26`, and validate RCSP `AE00/AE01/AE02` discovery and OTA flow with a compatible client.
 
 ## Blockers
 
 - Local q32s compiler/linker tools are unavailable.
-- The previous `0.1.1` image was built with q32s, but the Windows download device was offline and the new `0.1.2` OTA-enabled image has not yet been built or flashed on hardware.
+- The previous `0.1.1` image was built with q32s, but the Windows download device was offline and the new `0.1.3` startup-recovery image has not yet been built or flashed on hardware.
 
 ## Relevant Files
 

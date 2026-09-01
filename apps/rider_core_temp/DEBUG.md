@@ -24,13 +24,13 @@ Rider 的 boot/OTA 调试和应用日志统一复用 `PA0 / 115200`。应用阶�
 
 ### 烧录版本确认
 
-当前产品固件版本为 `0.1.2`，唯一真相源是 `include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`。应用每次启动 BLE 栈前都会从该宏输出以下 ASCII 日志：
+当前产品固件版本为 `0.1.3`，唯一真相源是 `include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`。应用每次启动 BLE 栈前都会从该宏输出以下 ASCII 日志：
 
 ```text
-[Info]: [RIDER_APP] Firmware version: 0.1.2
+[Info]: [RIDER_APP] Firmware version: 0.1.3
 ```
 
-日志宏可能因 SDK 格式在标签后省略一个空格，但 `Firmware version: 0.1.2` 必须完整出现。看到其他版本或完全看不到这行，都不能证明板上运行的是本次固件；应重新核对构建产物和烧录结果。连接 BLE 后还可读取 Device Information Service `0x180A` 的 Firmware Revision String `0x2A26`，其值也必须是 `0.1.2`。
+日志宏可能因 SDK 格式在标签后省略一个空格，但 `Firmware version: 0.1.3` 必须完整出现。看到其他版本或完全看不到这行，都不能证明板上运行的是本次固件；应重新核对构建产物和烧录结果。连接 BLE 后还可读取 Device Information Service `0x180A` 的 Firmware Revision String `0x2A26`，其值也必须是 `0.1.3`。
 
 ### 接线
 
@@ -168,4 +168,4 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p 'test_*.py'
 make ac632n_rider_core_temp
 ```
 
-烧录后按本说明连接串口，先确认出现 `Firmware version: 0.1.2`，再确认至少出现 `[RIDER_TEMP]`、`[RIDER_GATT]` 或 `[RIDER_BOARD_DIAG]` 标签。完整的 BLE、PB7 上拉、M601 CRC、佩戴状态和 Core 估算验收项见模块 [README.md](./README.md)。
+烧录后按本说明连接串口，先确认出现 `Firmware version: 0.1.3`，再确认至少出现 `[RIDER_TEMP]`、`[RIDER_GATT]` 或 `[RIDER_BOARD_DIAG]` 标签。完整的 BLE、PB7 上拉、M601 CRC、佩戴状态和 Core 估算验收项见模块 [README.md](./README.md)。

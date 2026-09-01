@@ -51,3 +51,11 @@ Cause: The board is still running an image built with the former application UAR
 Resolution: Keep the Rider board overrides at `CONFIG_UBOOT_DEBUG_PIN=PA00` and `CONFIG_UBOOT_DEBUG_BAUD_RATE=115200`, build and flash the current `ac632n_rider_core_temp` image, connect `USB-UART RX` only to `PA0`, share ground, and keep the terminal at `115200 / 8N1 / no flow control`.
 
 Important: A source-only change is not present on the board until the new image is flashed. If a freshly flashed image still produces random bytes, verify the selected image and PA0 wiring before investigating application log encoding; Rider source string literals and binary dumps are checked by `tools/test_rider_core_temp_serial.py`.
+
+## PB3 wakeup latch can be stale after reset
+
+Symptom: The firmware prints no Rider application logs and appears to power off immediately after reset.
+
+Cause: `get_wakeup_source()` may retain the PB3 wakeup bit after the key has already been released. Treating that bit alone as an active power-on gesture sends `app_main()` down the soft-poweroff path before `start_app()`.
+
+Resolution: The startup gate now requires both the wakeup bit and a live low PB3 level before enforcing the two-second hold. A released PB3 with a stale wakeup bit follows the normal startup prompt.

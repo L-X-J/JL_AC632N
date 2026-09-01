@@ -20,6 +20,7 @@ GLOBAL_BUILD_CONFIG = (
     / "apps/rider_core_temp/board/bd19/board_ac632n_rider_global_build_cfg.h"
 )
 DEBUG_DOC = ROOT / "apps/rider_core_temp/DEBUG.md"
+POWER_KEY_SOURCE = ROOT / "apps/rider_core_temp/modules/power/rider_power_key.c"
 UART_CLOCK_HZ = 24_000_000
 UART_BAUDRATE = 115_200
 
@@ -221,6 +222,19 @@ class RiderSerialContractTests(unittest.TestCase):
             config,
             r"#define\s+CONFIG_UBOOT_DEBUG_BAUD_RATE\s+115200\b",
         )
+
+    def test_startup_wakeup_requires_live_key(self):
+        """A stale wakeup latch must not prevent app_main from starting."""
+        source = POWER_KEY_SOURCE.read_text(encoding="utf-8")
+        self.assertRegex(
+            source,
+            r"u8\s+wakeup\s*=\s*rider_board_power_key_wakeup\(\);",
+        )
+        self.assertRegex(
+            source,
+            r"u8\s+pressed\s*=\s*rider_board_power_key_pressed\(\);",
+        )
+        self.assertRegex(source, r"if\s*\(\s*!wakeup\s*\|\|\s*!pressed\s*\)")
 
     def test_uart_divider_is_within_tolerance(self):
         """Check the SDK UART divider math stays within normal UART tolerance."""

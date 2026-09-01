@@ -203,13 +203,19 @@ uint8_t rider_power_key_startup_check(void)
 {
     u32 hold_started_ms = 0;
     u8 hold_started = 0;
+    u8 wakeup = rider_board_power_key_wakeup();
+    u8 pressed = rider_board_power_key_pressed();
 
     rider_board_diag_power_led_claim(0);
-    if (!rider_board_power_key_wakeup()) {
+    /* The wakeup latch can remain set across a reset after PB3 is released.
+     * Only enforce the two-second gesture while the key is physically held;
+     * a stale latch must not power the application straight back off. */
+    if (!wakeup || !pressed) {
         rider_power_key_state = RIDER_POWER_KEY_POWER_ON;
         rider_power_key_power_on_started_ms = sys_timer_get_ms();
         rider_board_diag_power_led_claim(1);
-        log_info("non-key startup, power-on prompt started\n");
+        log_info("normal startup: wakeup=%u key=%u, power-on prompt started\n",
+                 (unsigned)wakeup, (unsigned)pressed);
         return 1;
     }
 
