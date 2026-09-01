@@ -62,9 +62,10 @@
 //partial platform check this config to select the uart IO for wired update
 #define CONFIG_UART_UPDATE_PIN                  PB05
 
-//isd_download loader/uboot/update_loader debug io config
-//#define CONFIG_UBOOT_DEBUG_PIN                  PA05
-//#define CONFIG_UBOOT_DEBUG_BAUD_RATE            1000000
+// Keep boot/OTA diagnostics on the same wire and terminal settings as the
+// Rider application UART0. These stages do not drive the pin concurrently.
+#define CONFIG_UBOOT_DEBUG_PIN                  PA00
+#define CONFIG_UBOOT_DEBUG_BAUD_RATE            115200
 
 //config long-press reset io pin,time,trigger level
 #if CONFIG_LP_TOUCH_KEY_EN
