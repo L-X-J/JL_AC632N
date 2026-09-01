@@ -4,7 +4,7 @@ Last updated: 2026-09-01
 
 ## Current Focus
 
-Rider firmware startup recovery and BLE OTA channel validation for the `0.1.4` image.
+Rider `0.1.5` UART-only heartbeat isolation before restoring BLE startup.
 
 ## In Progress
 
@@ -34,12 +34,12 @@ None.
 
 ## Next
 
-- Build and flash the `0.1.4` image, verify `Firmware version: 0.1.4` over PA0/115200, read the same value from BLE `0x2A26`, and validate RCSP `AE00/AE01/AE02` discovery and OTA flow with a compatible client.
+- Build and flash the `0.1.5` image, then verify `Firmware version: 0.1.5; main heartbeat` repeats about every two seconds over PA0/115200. BLE is intentionally disabled in this image.
 
 ## Blockers
 
 - Local q32s compiler/linker tools are unavailable.
-- The previous `0.1.1` image was built with q32s, but the Windows download device was offline and the new `0.1.4` BLE bring-up image has not yet been built or flashed on hardware. `RIDER_POWER_KEY_ENABLE=0` currently bypasses the PB3 startup/runtime button state machine.
+- The `0.1.5` image has not yet been built or flashed on hardware. `RIDER_UART_HEARTBEAT_ONLY=1` bypasses application, BLE, J12 diagnostic and button startup; `RIDER_POWER_KEY_ENABLE=0` remains set independently.
 
 ## Relevant Files
 

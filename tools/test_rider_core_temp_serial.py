@@ -252,6 +252,27 @@ class RiderSerialContractTests(unittest.TestCase):
         self.assertIn("rider_power_key_startup_check()", startup_gate[1])
         self.assertIn("#endif", startup_gate[1])
 
+    def test_app_main_runs_uart_heartbeat_only(self):
+        """Keep the isolation image out of BLE, diagnostics and button setup."""
+        config = BOARD_CONFIG.read_text(encoding="utf-8")
+        self.assertRegex(
+            config,
+            r"#define\s+RIDER_UART_HEARTBEAT_ONLY\s+1\b",
+        )
+
+        app_main = APP_MAIN.read_text(encoding="utf-8")
+        heartbeat_path = app_main.split(
+            "void app_main(void)\n{\n#if RIDER_UART_HEARTBEAT_ONLY", 1
+        )
+        self.assertEqual(len(heartbeat_path), 2)
+        heartbeat_path = heartbeat_path[1].split("#else", 1)[0]
+        self.assertIn("RIDER_UART_HEARTBEAT_INTERVAL_MS  2000", app_main)
+        self.assertIn("sys_timer_add", heartbeat_path)
+        self.assertIn("return;", heartbeat_path)
+        self.assertNotIn("rider_board_diag_init", heartbeat_path)
+        self.assertNotIn("rider_power_key", heartbeat_path)
+        self.assertNotIn("start_app", heartbeat_path)
+
     def test_uart_divider_is_within_tolerance(self):
         """Check the SDK UART divider math stays within normal UART tolerance."""
         divider = ((UART_CLOCK_HZ + UART_BAUDRATE // 2) // UART_BAUDRATE) // 4 - 1
