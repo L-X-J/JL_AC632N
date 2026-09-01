@@ -20,8 +20,6 @@
 
 #if CONFIG_APP_RIDER_CORE_TEMP
 
-#define RIDER_UART_HEARTBEAT_INTERVAL_MS  2000
-
 /* Keep only tasks required by the application, BLE controller and SDK timers. */
 const struct task_info task_info_table[] = {
     {"app_core", 1, 0, 640, 128},
@@ -45,19 +43,6 @@ static const rider_ble_init_cfg_t rider_ble_config = {
     .same_address = 1,
     .appearance = 0x0300,
 };
-
-#if RIDER_UART_HEARTBEAT_ONLY
-static u16 rider_uart_heartbeat_timer_id;
-
-/** Prove that app_main and the PA0 debug UART remain alive. */
-static void rider_uart_heartbeat(void *priv)
-{
-    (void)priv;
-    /* CONFIG_RELEASE_ENABLE may encode log_print() records as binary. */
-    printf("RIDER_HEARTBEAT version=%s\r\n",
-           RIDER_CORE_TEMP_FIRMWARE_VERSION);
-}
-#endif
 
 /** Initialise the small compatibility state consumed by SDK library code. */
 void app_var_init(void)
@@ -157,15 +142,6 @@ REGISTER_APPLICATION(rider_core_temp_application) = {
 /** Enter the product application selected by the board target. */
 void app_main(void)
 {
-#if RIDER_UART_HEARTBEAT_ONLY
-    rider_uart_heartbeat(NULL);
-    rider_uart_heartbeat_timer_id = sys_timer_add(
-        NULL, rider_uart_heartbeat, RIDER_UART_HEARTBEAT_INTERVAL_MS);
-    if (!rider_uart_heartbeat_timer_id) {
-        log_error("main heartbeat timer failed\n");
-    }
-    return;
-#else
     struct intent it;
 
     app_var_init();
@@ -184,7 +160,6 @@ void app_main(void)
     it.name = "rider_core_temp";
     it.action = ACTION_RIDER_CORE_TEMP;
     start_app(&it);
-#endif
 }
 
 /** Replace the current application and start the requested action. */

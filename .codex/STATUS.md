@@ -4,7 +4,7 @@ Last updated: 2026-09-01
 
 ## Current Focus
 
-Rider `0.1.6` UART-only heartbeat isolation before restoring BLE startup.
+Rider `0.1.7` normal BLE startup restored after PA0 UART hardware verification.
 
 ## In Progress
 
@@ -34,12 +34,12 @@ None.
 
 ## Next
 
-- Build and flash the `0.1.6` image, then verify `RIDER_HEARTBEAT version=0.1.6` repeats about every two seconds over PA0/115200. The heartbeat uses direct `printf()` because release `log_print()` records may be binary; BLE is intentionally disabled in this image.
+- Build and flash the `0.1.7` image, then verify the Firmware Revision log, M601 initialization and BLE discovery over PA0/115200. PB3 power-key state remains disabled independently.
 
 ## Blockers
 
 - Local q32s compiler/linker tools are unavailable.
-- The `0.1.6` image has not yet been built or flashed on hardware. `RIDER_UART_HEARTBEAT_ONLY=1` bypasses application, BLE, J12 diagnostic and button startup; `RIDER_POWER_KEY_ENABLE=0` remains set independently.
+- The `0.1.7` normal-start image has not yet been built or flashed after the latest source change. `RIDER_POWER_KEY_ENABLE=0` remains set independently.
 
 ## Relevant Files
 

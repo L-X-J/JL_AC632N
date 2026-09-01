@@ -24,13 +24,7 @@ Rider 的 boot/OTA 调试和应用日志统一复用 `PA0 / 115200`。应用阶�
 
 ### 烧录版本确认
 
-当前诊断固件版本为 `0.1.6`，唯一真相源是 `include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`。板级设置 `RIDER_UART_HEARTBEAT_ONLY=1` 后，`app_main()` 不初始化按钮、J12 诊断或 BLE，只注册 2000 ms 定时器并返回。心跳使用底层 `printf()` 绕过 release 模式下可能产生二进制记录的 `log_print()`；串口会立即输出一次、随后每两秒输出以下 ASCII 日志：
-
-```text
-RIDER_HEARTBEAT version=0.1.6
-```
-
-`RIDER_HEARTBEAT version=0.1.6` 必须完整且约每两秒重复出现。看到其他版本、只有一次、仍是 `00 00 ...` 二进制流或完全看不到这行，都不能证明板上稳定运行的是本次固件；应重新核对构建产物、烧录结果、PA0 接线和 115200 设置。该诊断镜像故意不启动 BLE，无法扫描设备或读取 `0x2A26` 属于预期行为。
+当前固件版本为 `0.1.7`，唯一真相源是 `include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`。`app_main()` 已恢复正常 Rider 应用启动路径，会初始化 J12 板级诊断并启动 BLE；PB3 产品电源键状态机仍由 `RIDER_POWER_KEY_ENABLE=0` 独立关闭。启动日志中的 Firmware Revision 直接引用该版本宏，BLE Device Information `0x2A26` 也应返回同一版本。
 
 ### 接线
 
@@ -154,7 +148,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p 'test_*.py'
 1. 检查 `TCFG_UART0_ENABLE` 是否为 `ENABLE_THIS_MOUDLE`。
 2. 检查 `TCFG_UART0_TX_PORT` 是否为 `IO_PORTA_00`。
 3. 不要等待 UART0 RX 回显；当前固件只启用 TX。
-4. 先按 IOKey2 触发一次状态输出，或等待 M601 初始化和 BLE 生命周期日志。
+4. 等待 M601 初始化和 BLE 生命周期日志；J12 诊断仍可通过 IOKey1/IOKey2 触发状态输出。
 
 ### 看到十六进制行
 
@@ -168,4 +162,4 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p 'test_*.py'
 make ac632n_rider_core_temp
 ```
 
-烧录后按本说明连接串口，只验收 `RIDER_HEARTBEAT version=0.1.6` 是否约每两秒稳定重复。当前不应出现 `[RIDER_TEMP]`、`[RIDER_GATT]` 或 `[RIDER_BOARD_DIAG]` 运行日志，也不应期待扫描到 BLE；确认应用入口和 UART 正常后再关闭心跳模式并恢复下一层初始化。
+烧录后按本说明连接串口，确认出现 Firmware Revision `0.1.7`、M601 初始化和 BLE 生命周期日志，并扫描到 `ICXL-RTemp`。PB3 电源键状态机当前仍关闭；确认 BLE/温度链路稳定后，再单独评估是否启用 `RIDER_POWER_KEY_ENABLE`。

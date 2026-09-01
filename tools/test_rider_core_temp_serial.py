@@ -203,8 +203,8 @@ class RiderSerialContractTests(unittest.TestCase):
         )
 
         debug_document = DEBUG_DOC.read_text(encoding="utf-8")
-        self.assertIn(f"version={version}", debug_document)
-        self.assertIn("RIDER_UART_HEARTBEAT_ONLY=1", debug_document)
+        self.assertIn(f"`{version}`", debug_document)
+        self.assertIn("Firmware Revision", debug_document)
 
     def test_uart_configuration(self):
         """Keep the documented PA0 115200 8N1 debug contract stable."""
@@ -252,31 +252,19 @@ class RiderSerialContractTests(unittest.TestCase):
         self.assertIn("rider_power_key_startup_check()", startup_gate[1])
         self.assertIn("#endif", startup_gate[1])
 
-    def test_app_main_runs_uart_heartbeat_only(self):
-        """Keep the isolation image out of BLE, diagnostics and button setup."""
+    def test_app_main_restores_normal_startup(self):
+        """Keep the normal application path responsible for BLE startup."""
         config = BOARD_CONFIG.read_text(encoding="utf-8")
-        self.assertRegex(
-            config,
-            r"#define\s+RIDER_UART_HEARTBEAT_ONLY\s+1\b",
-        )
+        self.assertNotRegex(config, r"RIDER_UART_HEARTBEAT_ONLY")
 
         app_main = APP_MAIN.read_text(encoding="utf-8")
-        heartbeat_path = app_main.split(
-            "void app_main(void)\n{\n#if RIDER_UART_HEARTBEAT_ONLY", 1
-        )
-        self.assertEqual(len(heartbeat_path), 2)
-        heartbeat_path = heartbeat_path[1].split("#else", 1)[0]
-        self.assertIn("RIDER_UART_HEARTBEAT_INTERVAL_MS  2000", app_main)
-        self.assertIn("sys_timer_add", heartbeat_path)
-        self.assertIn(
-            'printf("RIDER_HEARTBEAT version=%s\\r\\n"',
-            app_main,
-        )
-        self.assertIn("return;", heartbeat_path)
-        self.assertNotIn("log_info", heartbeat_path)
-        self.assertNotIn("rider_board_diag_init", heartbeat_path)
-        self.assertNotIn("rider_power_key", heartbeat_path)
-        self.assertNotIn("start_app", heartbeat_path)
+        startup = app_main.split("void app_main(void)\n{", 1)
+        self.assertEqual(len(startup), 2)
+        startup = startup[1].split("}\n\n/** Replace", 1)[0]
+        self.assertIn("app_var_init();", startup)
+        self.assertIn("rider_board_diag_init();", startup)
+        self.assertIn('it.action = ACTION_RIDER_CORE_TEMP;', startup)
+        self.assertIn("start_app(&it);", startup)
 
     def test_uart_divider_is_within_tolerance(self):
         """Check the SDK UART divider math stays within normal UART tolerance."""
