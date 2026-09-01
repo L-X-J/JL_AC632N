@@ -4,7 +4,7 @@ Last updated: 2026-09-01
 
 ## Current Focus
 
-Rider `0.1.7` normal BLE startup restored after PA0 UART hardware verification.
+Rider `0.1.8` normal BLE startup with PB3 power-key state machine enabled for hardware testing.
 
 ## In Progress
 
@@ -34,12 +34,12 @@ None.
 
 ## Next
 
-- Build and flash the `0.1.7` image, then verify the Firmware Revision log, M601 initialization and BLE discovery over PA0/115200. PB3 power-key state remains disabled independently.
+- Build and flash the `0.1.8` image, then verify the Firmware Revision log, M601 initialization, BLE discovery and PB3 two-second power-key behavior over PA0/115200.
 
 ## Blockers
 
 - Local q32s compiler/linker tools are unavailable.
-- The `0.1.7` normal-start image has not yet been built or flashed after the latest source change. `RIDER_POWER_KEY_ENABLE=0` remains set independently.
+- The `0.1.8` image has not yet been built or flashed after enabling the PB3 power-key state machine.
 
 ## Relevant Files
 

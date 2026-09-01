@@ -236,12 +236,12 @@ class RiderSerialContractTests(unittest.TestCase):
         )
         self.assertRegex(source, r"if\s*\(\s*!wakeup\s*\|\|\s*!pressed\s*\)")
 
-    def test_power_key_is_disabled_for_ble_bringup(self):
-        """Keep the temporary BLE bring-up image out of the PB3 gate."""
+    def test_power_key_is_enabled_for_hardware_testing(self):
+        """Keep the PB3 power-key state machine enabled for hardware testing."""
         config = BOARD_CONFIG.read_text(encoding="utf-8")
         self.assertRegex(
             config,
-            r"#define\s+RIDER_POWER_KEY_ENABLE\s+0\b",
+            r"#define\s+RIDER_POWER_KEY_ENABLE\s+1\b",
         )
 
         app_main = APP_MAIN.read_text(encoding="utf-8")

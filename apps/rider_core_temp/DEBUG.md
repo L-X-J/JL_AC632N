@@ -24,7 +24,7 @@ Rider 的 boot/OTA 调试和应用日志统一复用 `PA0 / 115200`。应用阶�
 
 ### 烧录版本确认
 
-当前固件版本为 `0.1.7`，唯一真相源是 `include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`。`app_main()` 已恢复正常 Rider 应用启动路径，会初始化 J12 板级诊断并启动 BLE；PB3 产品电源键状态机仍由 `RIDER_POWER_KEY_ENABLE=0` 独立关闭。启动日志中的 Firmware Revision 直接引用该版本宏，BLE Device Information `0x2A26` 也应返回同一版本。
+当前固件版本为 `0.1.8`，唯一真相源是 `include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`。`app_main()` 会初始化 J12 板级诊断并启动 BLE；当前 `RIDER_POWER_KEY_ENABLE=1`，PB3 电源键执行两秒开机确认、运行态扫描和长按软关机。启动日志中的 Firmware Revision 直接引用该版本宏，BLE Device Information `0x2A26` 也应返回同一版本。
 
 ### 接线
 
@@ -162,4 +162,4 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p 'test_*.py'
 make ac632n_rider_core_temp
 ```
 
-烧录后按本说明连接串口，确认出现 Firmware Revision `0.1.7`、M601 初始化和 BLE 生命周期日志，并扫描到 `ICXL-RTemp`。PB3 电源键状态机当前仍关闭；确认 BLE/温度链路稳定后，再单独评估是否启用 `RIDER_POWER_KEY_ENABLE`。
+烧录后按本说明连接串口，确认出现 Firmware Revision `0.1.8`、M601 初始化和 BLE 生命周期日志，并扫描到 `ICXL-RTemp`。测试 PB3 时，按住至少 2 秒完成开机确认；运行中持续按住约 2 秒应进入关机快闪，随后执行软关机。
