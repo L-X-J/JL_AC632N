@@ -203,8 +203,8 @@ class RiderSerialContractTests(unittest.TestCase):
         )
 
         debug_document = DEBUG_DOC.read_text(encoding="utf-8")
-        self.assertIn(f"Firmware version: {version}", debug_document)
-        self.assertIn(f"其值也必须是 `{version}`", debug_document)
+        self.assertIn(f"version={version}", debug_document)
+        self.assertIn("RIDER_UART_HEARTBEAT_ONLY=1", debug_document)
 
     def test_uart_configuration(self):
         """Keep the documented PA0 115200 8N1 debug contract stable."""
@@ -268,7 +268,12 @@ class RiderSerialContractTests(unittest.TestCase):
         heartbeat_path = heartbeat_path[1].split("#else", 1)[0]
         self.assertIn("RIDER_UART_HEARTBEAT_INTERVAL_MS  2000", app_main)
         self.assertIn("sys_timer_add", heartbeat_path)
+        self.assertIn(
+            'printf("RIDER_HEARTBEAT version=%s\\r\\n"',
+            app_main,
+        )
         self.assertIn("return;", heartbeat_path)
+        self.assertNotIn("log_info", heartbeat_path)
         self.assertNotIn("rider_board_diag_init", heartbeat_path)
         self.assertNotIn("rider_power_key", heartbeat_path)
         self.assertNotIn("start_app", heartbeat_path)

@@ -24,13 +24,13 @@ Rider 的 boot/OTA 调试和应用日志统一复用 `PA0 / 115200`。应用阶�
 
 ### 烧录版本确认
 
-当前诊断固件版本为 `0.1.5`，唯一真相源是 `include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`。板级设置 `RIDER_UART_HEARTBEAT_ONLY=1` 后，`app_main()` 不初始化按钮、J12 诊断或 BLE，只注册 2000 ms 定时器并返回。串口会立即输出一次、随后每两秒输出以下 ASCII 日志：
+当前诊断固件版本为 `0.1.6`，唯一真相源是 `include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`。板级设置 `RIDER_UART_HEARTBEAT_ONLY=1` 后，`app_main()` 不初始化按钮、J12 诊断或 BLE，只注册 2000 ms 定时器并返回。心跳使用底层 `printf()` 绕过 release 模式下可能产生二进制记录的 `log_print()`；串口会立即输出一次、随后每两秒输出以下 ASCII 日志：
 
 ```text
-[Info]: [RIDER_APP] Firmware version: 0.1.5; main heartbeat
+RIDER_HEARTBEAT version=0.1.6
 ```
 
-日志宏可能因 SDK 格式在标签后省略一个空格，但 `Firmware version: 0.1.5; main heartbeat` 必须完整且约每两秒重复出现。看到其他版本、只有一次或完全看不到这行，都不能证明板上稳定运行的是本次固件；应重新核对构建产物、烧录结果、PA0 接线和 115200 设置。该诊断镜像故意不启动 BLE，无法扫描设备或读取 `0x2A26` 属于预期行为。
+`RIDER_HEARTBEAT version=0.1.6` 必须完整且约每两秒重复出现。看到其他版本、只有一次、仍是 `00 00 ...` 二进制流或完全看不到这行，都不能证明板上稳定运行的是本次固件；应重新核对构建产物、烧录结果、PA0 接线和 115200 设置。该诊断镜像故意不启动 BLE，无法扫描设备或读取 `0x2A26` 属于预期行为。
 
 ### 接线
 
@@ -168,4 +168,4 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p 'test_*.py'
 make ac632n_rider_core_temp
 ```
 
-烧录后按本说明连接串口，只验收 `Firmware version: 0.1.5; main heartbeat` 是否约每两秒稳定重复。当前不应出现 `[RIDER_TEMP]`、`[RIDER_GATT]` 或 `[RIDER_BOARD_DIAG]` 运行日志，也不应期待扫描到 BLE；确认应用入口和 UART 正常后再关闭心跳模式并恢复下一层初始化。
+烧录后按本说明连接串口，只验收 `RIDER_HEARTBEAT version=0.1.6` 是否约每两秒稳定重复。当前不应出现 `[RIDER_TEMP]`、`[RIDER_GATT]` 或 `[RIDER_BOARD_DIAG]` 运行日志，也不应期待扫描到 BLE；确认应用入口和 UART 正常后再关闭心跳模式并恢复下一层初始化。

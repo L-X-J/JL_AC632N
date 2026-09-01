@@ -53,8 +53,9 @@ static u16 rider_uart_heartbeat_timer_id;
 static void rider_uart_heartbeat(void *priv)
 {
     (void)priv;
-    log_info("Firmware version: %s; main heartbeat\n",
-             RIDER_CORE_TEMP_FIRMWARE_VERSION);
+    /* CONFIG_RELEASE_ENABLE may encode log_print() records as binary. */
+    printf("RIDER_HEARTBEAT version=%s\r\n",
+           RIDER_CORE_TEMP_FIRMWARE_VERSION);
 }
 #endif
 
