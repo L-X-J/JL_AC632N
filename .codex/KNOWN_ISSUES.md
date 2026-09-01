@@ -41,3 +41,13 @@ Symptom: A forced Rider build fails on `rcsp_user_update.h` or `log_tag_const_i_
 Cause: RCSP headers live in `JL_rcsp/rcsp_updata` and `JL_rcsp/bt_trans_data`, while the power module uses a dedicated log tag that must be defined in the Rider log configuration.
 
 Resolution: Keep both RCSP subdirectories in the Rider board Makefile include list and keep the `RIDER_POWER_KEY` constants in `apps/rider_core_temp/config/log_config.c`.
+
+## UART terminal shows continuous garbled bytes after switching to 115200
+
+Symptom: The terminal is configured as `115200 8N1 ASCII`, but the receive pane contains continuous random characters instead of `[Info]`/`[RIDER_*]` lines.
+
+Cause: The board is still running an image built with the former UART0 setting (`1000000 baud`). The terminal's ASCII/HEX mode and line-ending selector do not change the physical receive timing.
+
+Resolution: Build and flash the current `ac632n_rider_core_temp` image, reconnect `USB-UART RX` to `PA0`, share ground, and keep the terminal at `115200 / 8N1 / no flow control`.
+
+Important: A source-only change is not present on the board until the new image is flashed. If a freshly flashed image still produces random bytes, verify the selected image and PA0 wiring before investigating application log encoding; Rider source string literals and binary dumps are checked by `tools/test_rider_core_temp_serial.py`.

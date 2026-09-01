@@ -4,7 +4,7 @@ Last updated: 2026-08-31
 
 ## Current Focus
 
-Rider PB3 power-key and PB5 power-indicator integration.
+Rider UART serial diagnostics: standardize UART0 at 115200 and verify the flashed image and PA0 wiring.
 
 ## In Progress
 
@@ -24,10 +24,11 @@ None.
 - Retried the remote script after the board entered update mode; flash succeeded with `SPI nor flash online`, flash ID `cd7013`, size `512K`, `Write block:0` and download completion reported.
 - Fixed the Rider board Makefile RCSP subdirectory include paths and added the missing `RIDER_POWER_KEY` log constants.
 - Synchronized the local Rider power/board/configuration files to the remote checkout and forced `LINK_AT=0` compile/link; `sdk.elf` completed successfully, with only q32s stack-size warnings.
+- Changed the Rider UART0 debug contract from `1000000` to the standard `115200` baud (8N1); documented the screenshot garbled-byte failure mode and the required rebuild/flash step.
 
 ## Next
 
-- After the user confirms the board is in Update mode, package and flash this newly linked `sdk.elf`, then validate the startup, short-press, long-press and port-ownership cases.
+- After the user confirms the board is in Update mode, build/flash the image containing the 115200 UART change, then verify readable ASCII startup and temperature logs.
 
 ## Blockers
 

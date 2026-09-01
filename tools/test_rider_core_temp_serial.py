@@ -9,6 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MAKEFILE = ROOT / "apps/rider_core_temp/board/bd19/Makefile"
 BOARD_CONFIG = ROOT / "apps/rider_core_temp/board/bd19/board_ac632n_rider_cfg.h"
+DEBUG_DOC = ROOT / "apps/rider_core_temp/DEBUG.md"
 UART_CLOCK_HZ = 24_000_000
 UART_BAUDRATE = 115_200
 
@@ -153,6 +154,13 @@ class RiderSerialContractTests(unittest.TestCase):
         self.assertEqual(divider, 51)
         self.assertEqual(actual_baudrate, 115_384)
         self.assertLess(abs(actual_baudrate - UART_BAUDRATE) / UART_BAUDRATE, 0.02)
+
+    def test_debug_document_matches_uart_contract(self):
+        """Keep the standalone wiring guide aligned with the board header."""
+        document = DEBUG_DOC.read_text(encoding="utf-8")
+        self.assertIn("PA0", document)
+        self.assertIn("115200 / 8N1", document)
+        self.assertIn("必须重新编译并烧录固件", document)
 
     def test_non_ascii_literal_scanner_catches_escaped_values(self):
         """Cover C escape syntax so an escaped binary byte cannot bypass the check."""

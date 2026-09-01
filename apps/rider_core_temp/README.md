@@ -189,7 +189,7 @@ PB7 (`IO_PORTB_07`) 由 M601 1-Wire 总线独占：
 
 ## 串口诊断日志
 
-串口脚位、终端参数、波特率分频、ASCII 日志约束、字段说明和排障顺序见独立文档：[Rider CoreTemp 调试说明](./DEBUG.md)。
+UART0 只从 `PA0` 输出，终端固定使用 `115200 / 8N1 / no flow control / ASCII`；源码或配置修改后必须重新编译并烧录，旧镜像不会自动改变。串口脚位、波特率分频、ASCII 日志约束、字段说明和排障顺序见独立文档：[Rider CoreTemp 调试说明](./DEBUG.md)。
 
 ## 构建和验证
 
