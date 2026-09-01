@@ -73,7 +73,9 @@ static void rider_app_start(void)
 /** Stop the BLE stack before the application instance is destroyed. */
 static void rider_app_stop(void)
 {
+#if RIDER_POWER_KEY_ENABLE
     rider_power_key_stop();
+#endif
     if (!rider_btstack_started) {
         rider_board_diag_stop();
         return;
@@ -143,13 +145,17 @@ void app_main(void)
     struct intent it;
 
     app_var_init();
+#if RIDER_POWER_KEY_ENABLE
     rider_power_key_init();
     rider_power_key_register_poweroff_prepare(rider_app_stop);
+#endif
     rider_board_diag_init();
+#if RIDER_POWER_KEY_ENABLE
     if (!rider_power_key_startup_check()) {
         return;
     }
     rider_power_key_start();
+#endif
     init_intent(&it);
     it.name = "rider_core_temp";
     it.action = ACTION_RIDER_CORE_TEMP;

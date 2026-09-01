@@ -35,6 +35,8 @@
  * 保留给 M601，PA0 保留给 UART0 TX。若你的底板跳线不同，只修改这些板级宏。
  */
 #define RIDER_BOARD_DIAG_ENABLE              1
+/* Keep the PB3 product power-key state machine off during BLE bring-up. */
+#define RIDER_POWER_KEY_ENABLE                0
 #define RIDER_BOARD_POWER_KEY_PORT           IO_PORTB_03   // Rider 电源键，按下为低
 #define RIDER_BOARD_POWER_KEY_ACTIVE_LEVEL   0
 #define RIDER_BOARD_POWER_KEY_WAKEUP_INDEX   1            // wk_param.port[1]

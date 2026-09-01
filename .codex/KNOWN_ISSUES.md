@@ -58,4 +58,4 @@ Symptom: The firmware prints no Rider application logs and appears to power off 
 
 Cause: `get_wakeup_source()` may retain the PB3 wakeup bit after the key has already been released. Treating that bit alone as an active power-on gesture sends `app_main()` down the soft-poweroff path before `start_app()`.
 
-Resolution: The startup gate now requires both the wakeup bit and a live low PB3 level before enforcing the two-second hold. A released PB3 with a stale wakeup bit follows the normal startup prompt.
+Resolution: The startup gate now requires both the wakeup bit and a live low PB3 level before enforcing the two-second hold. A released PB3 with a stale wakeup bit follows the normal startup prompt. For BLE bring-up, the board profile currently sets `RIDER_POWER_KEY_ENABLE=0`, which bypasses the PB3 startup/runtime state machine entirely; set it to `1` only after the application is confirmed discoverable.

@@ -154,7 +154,7 @@ profile 使用 `include/core_temp_profile.h` 中的静态 ATT 数据，所有多
 
 当前板级 `board_ac632n_rider_global_build_cfg.h` 将 `CONFIG_APP_OTA_ENABLE` 设为 `1`，双备份仍为 `0`。因此 Rider profile 会编译 RCSP `AE00/AE01/AE02` 服务，并通过 `RCSP_BTMATE_EN`、`RCSP_UPDATE_EN` 打开 BLE OTA 命令路径；单备份模式的 `EXIF` 区域由后处理配置生成。升级前仍需使用兼容的 RCSP OTA 客户端，并在硬件上验证认证、文件信息、分块 ACK、校验和重启流程。当前微信小程序只探测 AE00 通道，E1-E7 传输状态机尚未认证，不会发送固件。
 
-本轮实验固件的 Firmware Revision 为 `0.1.3`，Core 模型版本为 `1`。产品固件版本的唯一真相源是 `include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`；启动串口日志和 Device Information `0x2A26` 都直接返回该值。每次人体/骑行实验都应把设备地址、固件版本、模型版本和标定 header 的来源与码表导出文件一起登记；仅凭温度列无法判断数据使用了哪套门控和系数。
+本轮实验固件的 Firmware Revision 为 `0.1.4`，Core 模型版本为 `1`。产品固件版本的唯一真相源是 `include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`；启动串口日志和 Device Information `0x2A26` 都直接返回该值。当前板级调试默认关闭 PB3 产品电源键状态机（`RIDER_POWER_KEY_ENABLE=0`），应用会直接进入 BLE 启动路径；恢复按键逻辑时将该宏改为 `1` 并重新验证 PB3 唤醒和长按时序。每次人体/骑行实验都应把设备地址、固件版本、模型版本和标定 header 的来源与码表导出文件一起登记；仅凭温度列无法判断数据使用了哪套门控和系数。
 
 CORE 温度通知的 Core 和 Skin 都是有符号百分之一摄氏度。当前实现把三个阶段分开：原始 Sensor 样本先通过 CRC、物理范围和 `30~45°C` 佩戴保护窗；5 点中值和 EWMA 形成接触温度；连续约 30 秒有效接触后，才把该固定胸带位置的滤波值标记为 Trusted Skin。`32~40°C` 是典型贴肤证据和重新佩戴辅助条件，不是可信皮温捷径，也不是人体核心温度范围。可信皮温建立后，若滤波值持续低于 `31.50°C` 约 60 秒，则锁存为脱落并清空 Skin/Core 资格，防止离体后稳定在 `30.3°C` 一类环境温度时继续上报旧值；重新回到典型贴肤温度后仍须重新完成预热。可信皮温建立后，自定义 CORE 约 1 Hz 附带 Skin，Core 在模型预热阶段明确为 `0x7FFF`。
 

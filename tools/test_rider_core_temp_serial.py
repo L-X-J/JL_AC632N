@@ -236,6 +236,22 @@ class RiderSerialContractTests(unittest.TestCase):
         )
         self.assertRegex(source, r"if\s*\(\s*!wakeup\s*\|\|\s*!pressed\s*\)")
 
+    def test_power_key_is_disabled_for_ble_bringup(self):
+        """Keep the temporary BLE bring-up image out of the PB3 gate."""
+        config = BOARD_CONFIG.read_text(encoding="utf-8")
+        self.assertRegex(
+            config,
+            r"#define\s+RIDER_POWER_KEY_ENABLE\s+0\b",
+        )
+
+        app_main = APP_MAIN.read_text(encoding="utf-8")
+        startup_gate = app_main.split(
+            "#if RIDER_POWER_KEY_ENABLE\n    if (", 1
+        )
+        self.assertEqual(len(startup_gate), 2)
+        self.assertIn("rider_power_key_startup_check()", startup_gate[1])
+        self.assertIn("#endif", startup_gate[1])
+
     def test_uart_divider_is_within_tolerance(self):
         """Check the SDK UART divider math stays within normal UART tolerance."""
         divider = ((UART_CLOCK_HZ + UART_BAUDRATE // 2) // UART_BAUDRATE) // 4 - 1
