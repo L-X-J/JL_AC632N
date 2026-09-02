@@ -3,16 +3,16 @@
 
 #include <stdint.h>
 
-/** Start the application-level LED and button diagnostics for the AC632N board. */
+/** 启动 AC632N 板级 LED/按键诊断。 */
 void rider_board_diag_init(void);
 
-/** Stop the diagnostics timer and leave all board LEDs un-driven. */
+/** 停止诊断定时器并释放全部板级 LED。 */
 void rider_board_diag_stop(void);
 
-/** Claim PB5 for power-key feedback without stopping LED1/LED3 diagnostics. */
+/** 将电源/红灯交给电源键反馈，不停止蓝灯等其它诊断。 */
 void rider_board_diag_power_led_claim(uint8_t on);
 
-/** Release PB5 so the next diagnostic render owns the temperature LED again. */
+/** 释放电源/红灯，交还诊断渲染（温度状态挂蓝灯）。 */
 void rider_board_diag_power_led_release(void);
 
 #endif
