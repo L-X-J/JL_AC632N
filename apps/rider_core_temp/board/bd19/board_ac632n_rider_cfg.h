@@ -23,29 +23,31 @@
 //*********************************************************************************//
 #define TCFG_UART0_ENABLE					ENABLE_THIS_MOUDLE                     //串口打印模块使能
 #define TCFG_UART0_RX_PORT					NO_CONFIG_PORT                         //串口接收脚配置（用于打印可以选择NO_CONFIG_PORT）
-#define TCFG_UART0_TX_PORT  				IO_PORTA_00                            //串口发送脚配置
+/* 产品板 PA0 必须悬空，禁止占用；调试串口 TX 暂不绑脚，需调试时另选空闲 IO 再改此宏 */
+#define TCFG_UART0_TX_PORT  				NO_CONFIG_PORT
 #define TCFG_UART0_BAUDRATE  				115200                                 //串口波特率配置
 
 //*********************************************************************************//
-//                              开发板诊断配置                                     //
+//                              产品板脚位 / 诊断配置                               //
 //*********************************************************************************//
 /*
- * AC632_DevKitBoard V2.0 的 LED1/2/3 与 IOKey1/2 位于 J12 接口，必须用跳线
- * 分别连接到下面的 MCU GPIO。默认映射只使用 PB0/PB1/PB3/PB4/PB5/PB6，PB7
- * 保留给 M601，PA0 保留给 UART0 TX。若你的底板跳线不同，只修改这些板级宏。
+ * 新板脚位（产品已定）：
+ *   KEY1=PA1（承接旧电源键业务）、KEY2=PA2（仅输入）、RED=PA7、BLUE=PA8、
+ *   温感=PB7（M601/GTM601 1-Wire）、PA0 悬空禁止占用、USB DP/DN 不改。
+ * 旧开发板 J12 跳线映射见 docs/BOARD_PINOUT.md；量产改脚只动本文件宏。
  */
 #define RIDER_BOARD_DIAG_ENABLE              1
-/* Enable the PB3 product power-key state machine for hardware testing. */
+/* 使能 KEY1(PA1) 电源键状态机（开机确认 / 长按软关机） */
 #define RIDER_POWER_KEY_ENABLE                1
-#define RIDER_BOARD_POWER_KEY_PORT           IO_PORTB_03   // Rider 电源键，按下为低
+#define RIDER_BOARD_POWER_KEY_PORT           IO_PORTA_01   // KEY1，低电平有效（旧板 PB3）
 #define RIDER_BOARD_POWER_KEY_ACTIVE_LEVEL   0
 #define RIDER_BOARD_POWER_KEY_WAKEUP_INDEX   1            // wk_param.port[1]
-#define RIDER_BOARD_POWER_LED_PORT           IO_PORTB_05   // Rider 电源指示灯，PB5 高电平亮
-#define RIDER_BOARD_DIAG_LED1_PORT          IO_PORTB_06   // J12 LED1, 红色
-#define RIDER_BOARD_DIAG_LED2_PORT          RIDER_BOARD_POWER_LED_PORT // J12 LED2, 绿色
-#define RIDER_BOARD_DIAG_LED3_PORT          IO_PORTB_04   // J12 LED3, 蓝色
-#define RIDER_BOARD_DIAG_IOKEY1_PORT        IO_PORTB_00   // J12 IOKey1, 按下为低
-#define RIDER_BOARD_DIAG_IOKEY2_PORT        IO_PORTB_01   // J12 IOKey2, 按下为低
+#define RIDER_BOARD_POWER_LED_PORT           IO_PORTA_07   // 红灯 / 电源指示，高电平亮（旧板 PB5）
+#define RIDER_BOARD_DIAG_LED1_PORT          IO_PORTA_07   // 红灯（与电源灯同脚，继续电源仲裁）
+#define RIDER_BOARD_DIAG_LED2_PORT          NO_CONFIG_PORT // 新板无独立绿灯；温度状态改挂蓝灯
+#define RIDER_BOARD_DIAG_LED3_PORT          IO_PORTA_08   // 蓝灯（传感器诊断，旧板 PB4）
+#define RIDER_BOARD_DIAG_IOKEY1_PORT        NO_CONFIG_PORT // KEY1 由电源状态机独占，诊断不再扫描
+#define RIDER_BOARD_DIAG_IOKEY2_PORT        IO_PORTA_02   // KEY2，仅输入初始化，本轮无业务回调
 #define RIDER_BOARD_DIAG_LED_ACTIVE_LEVEL   1
 #define RIDER_BOARD_DIAG_KEY_ACTIVE_LEVEL   0
 
@@ -61,10 +63,11 @@
 #define RIDER_CORE_TEMP_PUBLISH_MODE         RIDER_CORE_TEMP_PUBLISH_EXPERIMENTAL
 #endif
 
-#define UART_DB_TX_PIN                      IO_PORTA_01                            //AT_CHART串口
-#define UART_DB_RX_PIN                      IO_PORTA_02
-#define UART_DB_RTS_PIN                     IO_PORTA_06
-#define UART_DB_CTS_PIN                     IO_PORTA_05
+/* AT_CHART 调试口：勿占用 KEY1(PA1)/KEY2(PA2)；本产品未使用，全部置空 */
+#define UART_DB_TX_PIN                      NO_CONFIG_PORT
+#define UART_DB_RX_PIN                      NO_CONFIG_PORT
+#define UART_DB_RTS_PIN                     NO_CONFIG_PORT
+#define UART_DB_CTS_PIN                     NO_CONFIG_PORT
 
 //*********************************************************************************//
 //                                 USB 配置                                        //
@@ -98,9 +101,10 @@
   SCL         SDA
   'A': IO_PORT_DP   IO_PORT_DM
   'B': IO_PORTA_09  IO_PORTA_10
-  'C': IO_PORTA_07  IO_PORTA_08
+  'C': IO_PORTA_07  IO_PORTA_08   ← 与红/蓝灯冲突，禁止选用
   'D': IO_PORTA_05  IO_PORTA_06
  */
+/* 必须保持 'B'：'C' 组会抢占 PA7/PA8 灯脚 */
 #define TCFG_HW_I2C0_PORTS                  'B'
 #define TCFG_HW_I2C0_CLK                    100000                                  //硬件IIC波特率
 
@@ -146,7 +150,7 @@
 #define TCFG_SOFTOFF_WAKEUP_KEY_DRIVER_ENABLE       DISABLE_THIS_MOUDLE  //软关机唤醒按键不丢键使能, 目前只支持IOKEY
 
 //请根据board.c中的wakeup_param列表填写
-#define TCFG_WAKEUP_PORT_POWER_SRC          BIT(RIDER_BOARD_POWER_KEY_WAKEUP_INDEX) // PB3, port[1]
+#define TCFG_WAKEUP_PORT_POWER_SRC          BIT(RIDER_BOARD_POWER_KEY_WAKEUP_INDEX) // KEY1=PA1, port[1]
 #define TCFG_WAKEUP_PORT_PREV_SRC           BIT(2)  //唤醒口port[2]
 #define TCFG_WAKEUP_PORT_NEXT_SRC           BIT(3)  //唤醒口port[3]
 
@@ -384,7 +388,7 @@
 #else
 #define TCFG_SYS_LVD_EN						      1   //电量检测使能
 #endif
-#define TCFG_POWER_ON_NEED_KEY				      0	  //Generic key driver disabled; Rider owns PB3 in modules/power
+#define TCFG_POWER_ON_NEED_KEY				      0	  //通用按键关闭；KEY1(PA1) 由 modules/power 独占
 #define TCFG_HID_AUTO_SHUTDOWN_TIME              (0 * 60)      //HID无操作自动关机(单位：秒)
 
 //*********************************************************************************//

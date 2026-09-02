@@ -22,7 +22,24 @@ apps/rider_core_temp/
   board/bd19/                        AC632N 板级配置和启动适配
   config/                            SDK 库配置入口
   docs/BLE_PROTOCOL.md               App/Central BLE 协议交接
+  docs/BOARD_PINOUT.md               新旧板脚位对照与验证
 ```
+
+## 新板脚位（产品已定）
+
+完整新旧对照、冲突处理与烧录验证见 [`docs/BOARD_PINOUT.md`](docs/BOARD_PINOUT.md)。摘要：
+
+| 功能 | 新板脚位 | 说明 |
+|---|---|---|
+| 温感 M601/GTM601 | **PB7** | 与旧板相同，1-Wire 独占 |
+| KEY1（电源键业务） | **PA1** | 承接旧 PB3；`wk_param.port[1]` 同步 |
+| KEY2 | **PA2** | 仅输入初始化，本轮无业务回调、不上报 BLE |
+| 红灯 / 电源指示 | **PA7** | 诊断红灯与电源灯同脚，继续电源仲裁 |
+| 蓝灯 | **PA8** | 传感器/温度诊断（无独立绿灯） |
+| PA0 | **悬空** | 禁止占用；`TCFG_UART0_TX` 已置 `NO_CONFIG_PORT` |
+| USB DP/DN | 不改 | 保持关闭配置下的原有处理 |
+
+旧 DevKit J12 跳线说明见下文「AC632N 开发板初步诊断」，仅作历史参考；量产以本表与 `board_ac632n_rider_cfg.h` 为准。
 
 ## 数据流
 
@@ -39,10 +56,11 @@ J12（跳线接到 MCU GPIO）
   -> rider_board_diag.c: 按键去抖、BLE/温度状态采样
   -> LED 状态显示 + UART0 串口诊断
 
-PB3（低电平有效，内部上拉）
+KEY1=PA1（低电平有效，内部上拉；旧板为 PB3）
   -> board_ac632n_rider.c: GPIO 电平、wk_param.port[1] 唤醒结果
   -> rider_power_key.c: 开机确认、运行按键、软关机前置清理
-  -> PB5（高电平点亮）: 电源提示/按键反馈，结束后交还温度诊断
+  -> PA7 红灯（高电平点亮）: 电源提示/按键反馈，结束后交还 BLE/诊断
+KEY2=PA2：仅输入初始化，本轮无业务回调
 ```
 
 应用启动后先清空传感器/估算器状态，再初始化 BLE common 和静态 GATT profile，避免重启时用上一会话快照构造广播；随后维持温度调度。M601 每个采样周期先发 `0xCC 0x44`，等待 15 ms，再发 `0xCC 0xBE` 读取 9 字节 scratchpad。一次转换或读取失败只发布无效快照，不阻塞 BLE 任务。
@@ -76,7 +94,9 @@ LED 行为如下：
 
 IOKey1 按下会依次点亮三色灯完成约 1.2 秒自检；IOKey2 按下会输出一次 BLE/温度快照，不改变 BLE 协议状态。未接跳线的按键应保持释放状态。
 
-## PB3 按键和 PB5 电源指示灯
+## 电源键与指示灯（新板 KEY1=PA1，红灯=PA7）
+
+> 旧文档曾写 PB3/PB5；代码宏已迁到 PA1/PA7，详见 [BOARD_PINOUT.md](docs/BOARD_PINOUT.md)。
 
 Rider 的 PB3/PB5 是产品电源接口，不是从附加 AB202X 文档复制的硬件映射。PB3 由外部按键接地，按下为低电平；板级代码开启内部上拉，并把它登记为 BD19 `wk_param.port[1]` 的下降沿唤醒源。PB5 为高电平点亮，当前也对应 J12 的 LED2，因此温度诊断仍可使用同一物理灯，但必须经过电源状态机的仲裁。
 

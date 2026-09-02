@@ -54,7 +54,7 @@ void debug_uart_init(const struct uart_platform_data *data)
 #endif
 }
 
-/** Configure PB3 as the active-low power key used by both wakeup and runtime scans. */
+/** 将 KEY1(PA1) 配置为低电平有效输入，供唤醒与运行态扫描共用。 */
 static void rider_power_key_gpio_init(void)
 {
     gpio_set_die(RIDER_BOARD_POWER_KEY_PORT, 1);
@@ -63,14 +63,26 @@ static void rider_power_key_gpio_init(void)
     gpio_set_direction(RIDER_BOARD_POWER_KEY_PORT, 1);
 }
 
-/** Return the current physical PB3 level through the board adapter boundary. */
+/** 将 KEY2(PA2) 配置为输入；本轮无业务回调，仅初始化脚位。 */
+static void rider_key2_gpio_init(void)
+{
+    if (RIDER_BOARD_DIAG_IOKEY2_PORT == NO_CONFIG_PORT) {
+        return;
+    }
+    gpio_set_die(RIDER_BOARD_DIAG_IOKEY2_PORT, 1);
+    gpio_set_pull_down(RIDER_BOARD_DIAG_IOKEY2_PORT, 0);
+    gpio_set_pull_up(RIDER_BOARD_DIAG_IOKEY2_PORT, 1);
+    gpio_set_direction(RIDER_BOARD_DIAG_IOKEY2_PORT, 1);
+}
+
+/** 通过板级适配边界返回 KEY1 当前物理电平是否按下。 */
 uint8_t rider_board_power_key_pressed(void)
 {
     return gpio_read(RIDER_BOARD_POWER_KEY_PORT) ==
            RIDER_BOARD_POWER_KEY_ACTIVE_LEVEL;
 }
 
-/** Return whether the P33 wakeup source points at wk_param.port[1] (PB3). */
+/** 判断 P33 唤醒源是否指向 wk_param.port[1]（KEY1=PA1）。 */
 uint8_t rider_board_power_key_wakeup(void)
 {
     return (get_wakeup_source() & TCFG_WAKEUP_PORT_POWER_SRC) != 0;
@@ -91,15 +103,15 @@ static void rider_protect_port(u16 *groups, u32 port)
     groups[port / IO_GROUP_NUM] &= (u16)~BIT(port % IO_GROUP_NUM);
 }
 
-/** Put unused GPIOs in a quiet state while preserving the PB7 sensor bus. */
+/** 将未用 GPIO 置安静态；保留 PB7 温感总线与产品 KEY/灯脚。 */
 static void rider_close_gpio(void)
 {
     u16 groups[3] = {0x1ff, 0x3ff, 0x3ff};
 
     rider_protect_port(groups, RIDER_BOARD_POWER_KEY_PORT);
-    /* PB5 is also the product power LED; keep it out of generic GPIO cleanup. */
+    /* 红灯兼电源指示，勿被通用 GPIO 清理改写 */
     rider_protect_port(groups, RIDER_BOARD_POWER_LED_PORT);
-    /* PB7 is deliberately excluded from the high-impedance mask. */
+    /* PB7 温感 1-Wire 独占，刻意排除在高阻清理之外 */
     rider_protect_port(groups, IO_PORTB_07);
 #if RIDER_BOARD_DIAG_ENABLE
     rider_protect_port(groups, RIDER_BOARD_DIAG_LED1_PORT);
@@ -150,7 +162,7 @@ static void rider_close_gpio(void)
     gpio_set_dieh(IO_PORT_DM1, 0);
 }
 
-/** PB3 is the sole digital wake source; other product ports retain their roles. */
+/** KEY1(PA1) 为唯一数字唤醒源；其余产品脚位保持各自职责。 */
 static const struct port_wakeup rider_power_key_wakeup = {
     .pullup_down_enable = ENABLE,
     .edge               = FALLING_EDGE,
@@ -163,7 +175,7 @@ const struct wakeup_param wk_param = {
     .port[RIDER_BOARD_POWER_KEY_WAKEUP_INDEX] = &rider_power_key_wakeup,
 };
 
-/** Prepare the board for software power-off without touching PB7 ownership. */
+/** 软关机前整理 GPIO，不触碰 PB7 温感所有权。 */
 void board_set_soft_poweroff(void)
 {
     rider_close_gpio();
@@ -188,6 +200,7 @@ void board_power_init(void)
 {
     power_init(&power_param);
     rider_power_key_gpio_init();
+    rider_key2_gpio_init();
     gpio_longpress_pin0_reset_config(IO_PORTA_09, 0, 0);
     gpio_shortpress_reset_config(0);
     power_set_callback(TCFG_LOWPOWER_LOWPOWER_SEL,

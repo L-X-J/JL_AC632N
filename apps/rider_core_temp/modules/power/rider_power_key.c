@@ -47,7 +47,7 @@ static u32 rider_power_key_elapsed(u32 start_ms)
     return sys_timer_get_ms() - start_ms;
 }
 
-/** Update the debounced PB3 state without turning it into a generic key event. */
+/** 更新 KEY1 去抖状态，不转化为通用按键事件。 */
 static void rider_power_key_update_input(void)
 {
     u8 raw = rider_board_power_key_pressed();
@@ -198,7 +198,7 @@ void rider_power_key_register_poweroff_prepare(
     rider_power_key_prepare_poweroff = callback;
 }
 
-/** Confirm a PB3 wakeup by requiring a continuous two-second low level. */
+/** 确认 KEY1 唤醒：需持续两秒低电平。 */
 uint8_t rider_power_key_startup_check(void)
 {
     u32 hold_started_ms = 0;
@@ -207,9 +207,8 @@ uint8_t rider_power_key_startup_check(void)
     u8 pressed = rider_board_power_key_pressed();
 
     rider_board_diag_power_led_claim(0);
-    /* The wakeup latch can remain set across a reset after PB3 is released.
-     * Only enforce the two-second gesture while the key is physically held;
-     * a stale latch must not power the application straight back off. */
+    /* 复位后唤醒锁存可能仍置位而 KEY1 已松开。
+     * 仅在按键实际按住时执行两秒手势；陈旧锁存不得直接再次关机。 */
     if (!wakeup || !pressed) {
         rider_power_key_state = RIDER_POWER_KEY_POWER_ON;
         rider_power_key_power_on_started_ms = sys_timer_get_ms();
@@ -219,7 +218,7 @@ uint8_t rider_power_key_startup_check(void)
         return 1;
     }
 
-    log_info("PB3 wakeup, waiting for continuous hold\n");
+    log_info("KEY1 wakeup, waiting for continuous hold\n");
     while (1) {
         u32 now_ms = sys_timer_get_ms();
 
@@ -227,7 +226,7 @@ uint8_t rider_power_key_startup_check(void)
             rider_power_key_poweroff_requested = 1;
             rider_power_key_stop();
             rider_board_diag_stop();
-            log_info("PB3 released before power-on threshold\n");
+            log_info("KEY1 released before power-on threshold\n");
             power_set_soft_poweroff();
             return 0;
         }
@@ -268,7 +267,7 @@ void rider_power_key_start(void)
              (unsigned)RIDER_POWER_KEY_SCAN_MS);
 }
 
-/** Stop scanning and leave PB5 forced off while a shutdown is being prepared. */
+/** 停止扫描；关机准备期间强制关闭电源/红灯。 */
 void rider_power_key_stop(void)
 {
     if (rider_power_key_timer_id) {
