@@ -21,6 +21,7 @@ apps/rider_core_temp/
   modules/temp/                      PB7/M601 1-Wire 驱动、滤波与快照转换
   board/bd19/                        AC632N 板级配置和启动适配
   config/                            SDK 库配置入口
+  docs/BLE_PROTOCOL.md               App/Central BLE 协议交接
 ```
 
 ## 数据流
@@ -146,13 +147,13 @@ profile 使用 `include/core_temp_profile.h` 中的静态 ATT 数据，所有多
 
 温度字段当前值无效时统一为 `0x7FFF`；`core_estimate_centi` 保留算法候选，`published_core_centi` 由板级 `RIDER_CORE_TEMP_PUBLISH_MODE` 决定，便于记录实验值而不污染兼容 CORE 特征。服务 UUID 不放进现有 31 字节广播，Central 应按设备名连接后按 UUID 发现服务。
 
-## 微信小程序调试台
+## Flutter 配套 / 调试 App
 
-小程序位于 [`wechat_miniprogram/rider_core_temp_debug`](../../wechat_miniprogram/rider_core_temp_debug/README.md)，首屏提供扫描 `ICXL-RTemp`、按 UUID 连接并订阅 `0x2111`、实时查看 Sensor/Contact/Skin/Core、暂停/清空记录、原始十六进制和 CSV 导出。它只解码协议字段，不重新实现温度滤波或 Core 算法；每条记录保留 sequence、模型版本、质量、状态、置信度和原始帧。
+配套 App 工程位于 [`flutter/icxl_rtemp_companion`](../../flutter/icxl_rtemp_companion/)。扫描设备名 `ICXL-RTemp`，连上后先抬 MTU 再订阅 `0x2111`，展示传感器/按键/电量状态、三条温度曲线（原始 / 滤波皮温 / 核心）并支持 CSV 导出。协议细节以 [`docs/BLE_PROTOCOL.md`](docs/BLE_PROTOCOL.md) 为准。App 只解码协议字段，不重新实现温度滤波或 Core 算法。
 
 ### OTA 边界
 
-当前板级 `board_ac632n_rider_global_build_cfg.h` 将 `CONFIG_APP_OTA_ENABLE` 设为 `1`，双备份仍为 `0`。因此 Rider profile 会编译 RCSP `AE00/AE01/AE02` 服务，并通过 `RCSP_BTMATE_EN`、`RCSP_UPDATE_EN` 打开 BLE OTA 命令路径；单备份模式的 `EXIF` 区域由后处理配置生成。升级前仍需使用兼容的 RCSP OTA 客户端，并在硬件上验证认证、文件信息、分块 ACK、校验和重启流程。当前微信小程序只探测 AE00 通道，E1-E7 传输状态机尚未认证，不会发送固件。
+当前板级 `board_ac632n_rider_global_build_cfg.h` 将 `CONFIG_APP_OTA_ENABLE` 设为 `1`，双备份仍为 `0`。因此 Rider profile 会编译 RCSP `AE00/AE01/AE02` 服务，并通过 `RCSP_BTMATE_EN`、`RCSP_UPDATE_EN` 打开 BLE OTA 命令路径；单备份模式的 `EXIF` 区域由后处理配置生成。升级前仍需使用兼容的 RCSP OTA 客户端，并在硬件上验证认证、文件信息、分块 ACK、校验和重启流程。Flutter 配套 App 当前不做 RCSP OTA；AE00 通道探测与 E1-E7 传输状态机尚未认证，不会发送固件。
 
 本轮固件的 Firmware Revision 为 `0.1.8`，Core 模型版本为 `1`。产品固件版本的唯一真相源是 `include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`。`app_main()` 初始化应用状态、J12 板级诊断并启动 BLE；当前 `RIDER_POWER_KEY_ENABLE=1`，PB3 电源键会执行两秒开机确认、运行态扫描和长按软关机。串口继续使用 PA0 / 115200，启动日志直接引用同一版本宏。每次人体/骑行实验都应把设备地址、固件版本、模型版本和标定 header 的来源与码表导出文件一起登记；仅凭温度列无法判断数据使用了哪套门控和系数。
 

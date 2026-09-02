@@ -1,9 +1,0 @@
-{
-  "desc": "CoreTemp debug collector sitemap",
-  "rules": [
-    {
-      "action": "allow",
-      "page": "pages/index/index"
-    }
-  ]
-}
