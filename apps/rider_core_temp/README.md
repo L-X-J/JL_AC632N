@@ -36,7 +36,7 @@ apps/rider_core_temp/
 | KEY2 | **PA2** | 仅输入初始化，本轮无业务回调、不上报 BLE |
 | 红灯 / 电源指示 | **PA7** | 诊断红灯与电源灯同脚，继续电源仲裁 |
 | 蓝灯 | **PA8** | 传感器/温度诊断（无独立绿灯） |
-| PA0 | **悬空** | 禁止占用；`TCFG_UART0_TX` 已置 `NO_CONFIG_PORT` |
+| PA0 | **悬空** | 禁止占用；`TCFG_UART0_TX` 已迁到 `PB5`（新板未引出） |
 | USB DP/DN | 不改 | 保持关闭配置下的原有处理 |
 
 旧 DevKit J12 跳线说明见下文「AC632N 开发板初步诊断」，仅作历史参考；量产以本表与 `board_ac632n_rider_cfg.h` 为准。
@@ -175,7 +175,7 @@ profile 使用 `include/core_temp_profile.h` 中的静态 ATT 数据，所有多
 
 当前板级 `board_ac632n_rider_global_build_cfg.h` 将 `CONFIG_APP_OTA_ENABLE` 设为 `1`，双备份仍为 `0`。因此 Rider profile 会编译 RCSP `AE00/AE01/AE02` 服务，并通过 `RCSP_BTMATE_EN`、`RCSP_UPDATE_EN` 打开 BLE OTA 命令路径；单备份模式的 `EXIF` 区域由后处理配置生成。升级前仍需使用兼容的 RCSP OTA 客户端，并在硬件上验证认证、文件信息、分块 ACK、校验和重启流程。Flutter 配套 App 当前不做 RCSP OTA；AE00 通道探测与 E1-E7 传输状态机尚未认证，不会发送固件。
 
-本轮固件的 Firmware Revision 为 `0.1.8`，Core 模型版本为 `1`。产品固件版本的唯一真相源是 `include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`。`app_main()` 初始化应用状态、J12 板级诊断并启动 BLE；当前 `RIDER_POWER_KEY_ENABLE=1`，PB3 电源键会执行两秒开机确认、运行态扫描和长按软关机。串口继续使用 PA0 / 115200，启动日志直接引用同一版本宏。每次人体/骑行实验都应把设备地址、固件版本、模型版本和标定 header 的来源与码表导出文件一起登记；仅凭温度列无法判断数据使用了哪套门控和系数。
+本轮固件的 Firmware Revision 为 `0.1.8`，Core 模型版本为 `1`。产品固件版本的唯一真相源是 `include/rider_core_temp.h` 中的 `RIDER_CORE_TEMP_FIRMWARE_VERSION`。`app_main()` 初始化应用状态、J12 板级诊断并启动 BLE；当前 `RIDER_POWER_KEY_ENABLE=1`，PB3 电源键会执行两秒开机确认、运行态扫描和长按软关机。串口调试使用 PB5 / 115200（新板 PA0 悬空），启动日志直接引用同一版本宏。每次人体/骑行实验都应把设备地址、固件版本、模型版本和标定 header 的来源与码表导出文件一起登记；仅凭温度列无法判断数据使用了哪套门控和系数。
 
 CORE 温度通知的 Core 和 Skin 都是有符号百分之一摄氏度。当前实现把三个阶段分开：原始 Sensor 样本先通过 CRC、物理范围和 `30~45°C` 佩戴保护窗；5 点中值和 EWMA 形成接触温度；连续约 30 秒有效接触后，才把该固定胸带位置的滤波值标记为 Trusted Skin。`32~40°C` 是典型贴肤证据和重新佩戴辅助条件，不是可信皮温捷径，也不是人体核心温度范围。可信皮温建立后，若滤波值持续低于 `31.50°C` 约 60 秒，则锁存为脱落并清空 Skin/Core 资格，防止离体后稳定在 `30.3°C` 一类环境温度时继续上报旧值；重新回到典型贴肤温度后仍须重新完成预热。可信皮温建立后，自定义 CORE 约 1 Hz 附带 Skin，Core 在模型预热阶段明确为 `0x7FFF`。
 
@@ -211,7 +211,7 @@ PB7 (`IO_PORTB_07`) 由 M601 1-Wire 总线独占：
 
 ## 串口诊断日志
 
-boot/OTA 调试和应用 UART0 统一从 `PA0` 输出，终端固定使用 `115200 / 8N1 / no flow control / ASCII`；源码或配置修改后必须重新编译并烧录，旧镜像不会自动改变。串口脚位、波特率分频、ASCII 日志约束、字段说明和排障顺序见独立文档：[Rider CoreTemp 调试说明](./DEBUG.md)。
+boot/OTA 调试和应用 UART0 统一从 `PB5` 输出（新板未引出该脚，仅开发板接线），终端固定使用 `115200 / 8N1 / no flow control / ASCII`；源码或配置修改后必须重新编译并烧录，旧镜像不会自动改变。串口脚位、波特率分频、ASCII 日志约束、字段说明和排障顺序见独立文档：[Rider CoreTemp 调试说明](./DEBUG.md)。
 
 ## 构建和验证
 

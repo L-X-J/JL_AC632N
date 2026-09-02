@@ -64,7 +64,7 @@
 
 // Keep boot/OTA diagnostics on the same wire and terminal settings as the
 // Rider application UART0. These stages do not drive the pin concurrently.
-#define CONFIG_UBOOT_DEBUG_PIN                  PA00
+#define CONFIG_UBOOT_DEBUG_PIN                  PB05  /* 新板未引出；仅开发板看 log；PA0 悬空 */
 #define CONFIG_UBOOT_DEBUG_BAUD_RATE            115200
 
 //config long-press reset io pin,time,trigger level

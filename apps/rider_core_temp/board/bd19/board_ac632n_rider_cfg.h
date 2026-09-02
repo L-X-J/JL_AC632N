@@ -23,8 +23,8 @@
 //*********************************************************************************//
 #define TCFG_UART0_ENABLE					ENABLE_THIS_MOUDLE                     //串口打印模块使能
 #define TCFG_UART0_RX_PORT					NO_CONFIG_PORT                         //串口接收脚配置（用于打印可以选择NO_CONFIG_PORT）
-/* 产品板 PA0 必须悬空，禁止占用；调试串口 TX 暂不绑脚，需调试时另选空闲 IO 再改此宏 */
-#define TCFG_UART0_TX_PORT  				NO_CONFIG_PORT
+/* 产品板 PA0 悬空禁止占用；调试 UART0 TX 挂新板未引出的 PB5，仅开发板排针看 log */
+#define TCFG_UART0_TX_PORT  				IO_PORTB_05
 #define TCFG_UART0_BAUDRATE  				115200                                 //串口波特率配置
 
 //*********************************************************************************//
