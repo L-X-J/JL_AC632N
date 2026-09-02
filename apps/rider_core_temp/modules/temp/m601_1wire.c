@@ -51,6 +51,7 @@ static void rider_delay_us(u32 usec)
 }
 
 static rider_temperature_sample_t rider_latest_sample;
+static rider_m601_diag_t rider_m601_diag;
 static u16 rider_conversion_timeout;
 static u8 rider_conversion_pending;
 static u8 rider_m601_crc8(const u8 *data, u8 length);
@@ -91,12 +92,27 @@ static void rider_1wire_drive_low(void)
 static u8 rider_1wire_reset_presence(void)
 {
     u8 present;
+    u8 dq_idle_high;
+
+    /* 采样 reset 前空闲电平：有外部上拉时通常为高 */
+    rider_1wire_release();
+    dq_idle_high = (gpio_read(RIDER_M601_DQ_PORT) != 0);
+    if (dq_idle_high) {
+        rider_m601_diag.bus_flags |= RIDER_M601_BUS_FLAG_DQ_IDLE_HI;
+    } else {
+        rider_m601_diag.bus_flags &= (u8)~RIDER_M601_BUS_FLAG_DQ_IDLE_HI;
+    }
 
     rider_1wire_drive_low();
     rider_delay_us(480);
     rider_1wire_release();
     rider_delay_us(70);
     present = (gpio_read(RIDER_M601_DQ_PORT) == 0);
+    if (present) {
+        rider_m601_diag.bus_flags |= RIDER_M601_BUS_FLAG_PRESENCE;
+    } else {
+        rider_m601_diag.bus_flags &= (u8)~RIDER_M601_BUS_FLAG_PRESENCE;
+    }
     rider_delay_us(410);
     return present;
 }
@@ -209,14 +225,20 @@ static int rider_m601_decode(const u8 *scratchpad, int16_t *temperature_centi)
 }
 
 /** Advance the sequence and publish an unavailable sample after a failure. */
-static void rider_m601_record_failure(u8 status)
+static void rider_m601_record_failure(u8 status, u8 phase)
 {
     rider_latest_sample.sequence++;
     rider_latest_sample.valid = 0;
     rider_latest_sample.status = status;
     rider_latest_sample.temperature_centi = 0x7fff;
-    log_info("M601 sample failure: seq=%u status=%u valid=0 temp_centi=32767\n",
-             (unsigned)rider_latest_sample.sequence, (unsigned)status);
+    rider_m601_diag.fail_phase = phase;
+    if (rider_m601_diag.fail_streak < 255) {
+        rider_m601_diag.fail_streak++;
+    }
+    log_info("M601 sample failure: seq=%u status=%u phase=%u streak=%u bus=0x%02x valid=0\n",
+             (unsigned)rider_latest_sample.sequence, (unsigned)status,
+             (unsigned)phase, (unsigned)rider_m601_diag.fail_streak,
+             (unsigned)rider_m601_diag.bus_flags);
 }
 
 /** Read and validate the scratchpad after the conversion delay expires. */
@@ -235,7 +257,8 @@ static void rider_m601_complete_conversion(void *priv)
     rider_conversion_pending = 0;
 
     if (!rider_1wire_reset_presence()) {
-        rider_m601_record_failure(RIDER_TEMP_STATUS_NO_DEVICE);
+        rider_m601_record_failure(RIDER_TEMP_STATUS_NO_DEVICE,
+                                  RIDER_M601_PHASE_NO_PRESENCE_READ);
         return;
     }
 
@@ -251,8 +274,20 @@ static void rider_m601_complete_conversion(void *priv)
     rider_latest_sample.valid = (status == RIDER_TEMP_STATUS_OK);
     if (rider_latest_sample.valid) {
         rider_latest_sample.temperature_centi = temperature_centi;
+        rider_m601_diag.fail_phase = RIDER_M601_PHASE_OK;
+        rider_m601_diag.fail_streak = 0;
     } else {
         rider_latest_sample.temperature_centi = 0x7fff;
+        if (status == RIDER_TEMP_STATUS_CRC_ERROR) {
+            rider_m601_diag.fail_phase = RIDER_M601_PHASE_CRC;
+        } else if (status == RIDER_TEMP_STATUS_RANGE_ERROR) {
+            rider_m601_diag.fail_phase = RIDER_M601_PHASE_RANGE;
+        } else {
+            rider_m601_diag.fail_phase = RIDER_M601_PHASE_OK;
+        }
+        if (rider_m601_diag.fail_streak < 255) {
+            rider_m601_diag.fail_streak++;
+        }
     }
     rider_m601_log_sample(scratchpad, status, temperature_centi);
     rider_1wire_release();
@@ -262,7 +297,9 @@ static void rider_m601_complete_conversion(void *priv)
 void rider_temp_init(void)
 {
     memset(&rider_latest_sample, 0, sizeof(rider_latest_sample));
+    memset(&rider_m601_diag, 0, sizeof(rider_m601_diag));
     rider_latest_sample.status = RIDER_TEMP_STATUS_NO_DEVICE;
+    rider_m601_diag.fail_phase = RIDER_M601_PHASE_NO_PRESENCE_CONVERT;
     rider_conversion_timeout = 0;
     rider_conversion_pending = 0;
     log_info("M601 init: port=PB7 convert_delay_ms=%u crc_check=%u\n",
@@ -288,7 +325,8 @@ void rider_temp_start_conversion(void)
         return;
     }
     if (!rider_1wire_reset_presence()) {
-        rider_m601_record_failure(RIDER_TEMP_STATUS_NO_DEVICE);
+        rider_m601_record_failure(RIDER_TEMP_STATUS_NO_DEVICE,
+                                  RIDER_M601_PHASE_NO_PRESENCE_CONVERT);
         return;
     }
 
@@ -301,7 +339,8 @@ void rider_temp_start_conversion(void)
                                                 RIDER_M601_CONVERT_DELAY_MS);
     if (!rider_conversion_timeout) {
         rider_conversion_pending = 0;
-        rider_m601_record_failure(RIDER_TEMP_STATUS_NO_DEVICE);
+        rider_m601_record_failure(RIDER_TEMP_STATUS_NO_DEVICE,
+                                  RIDER_M601_PHASE_TIMER);
         rider_1wire_release();
     }
 }
@@ -320,6 +359,15 @@ int rider_temp_copy_latest(rider_temperature_sample_t *sample)
     }
     memcpy(sample, &rider_latest_sample, sizeof(*sample));
     return 1;
+}
+
+/** 拷贝 M601 总线诊断供 BLE 0x2111 编码。 */
+void rider_temp_copy_m601_diag(rider_m601_diag_t *diag)
+{
+    if (!diag) {
+        return;
+    }
+    *diag = rider_m601_diag;
 }
 
 #endif

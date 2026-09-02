@@ -7,8 +7,10 @@
 
 #define RIDER_TEMP_CODEC_CORE_FRAME_MAX 9
 #define RIDER_TEMP_CODEC_STANDARD_FRAME_SIZE 5
-#define RIDER_TEMP_CODEC_DEBUG_PROTOCOL_VERSION 1
+#define RIDER_TEMP_CODEC_DEBUG_PROTOCOL_VERSION 2
 #define RIDER_TEMP_CODEC_DEBUG_FRAME_SIZE 41
+/* v2：@36=m601_bus_flags @37=m601_fail_phase @38=m601_fail_streak
+ * （原 freshness/confidence/model_mode 让位给无串口排障；@39 model_version @40 hr_used 不变） */
 
 /* Fixed debug snapshot flags.  The value fields remain present in every
  * frame; a clear bit means that the corresponding temperature is 0x7fff. */
