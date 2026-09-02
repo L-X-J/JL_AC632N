@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:icxl_rtemp_companion/ble/ble_controller.dart';
-import 'package:icxl_rtemp_companion/ui/home_page.dart';
+import 'package:icxl_rtemp_companion/theme/app_theme.dart';
+import 'package:icxl_rtemp_companion/ui/scan_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,13 +33,12 @@ class _IcxlRtempAppState extends State<IcxlRtempApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ICXL 核心体温伴侣',
+      title: 'ICXL-RTemp',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF00897B)),
-        useMaterial3: true,
-      ),
-      home: HomePage(controller: _controller),
+      theme: buildAppTheme(Brightness.light),
+      darkTheme: buildAppTheme(Brightness.dark),
+      themeMode: ThemeMode.system,
+      home: ScanPage(controller: _controller),
     );
   }
 }

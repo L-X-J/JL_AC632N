@@ -29,8 +29,8 @@ class BleController extends ChangeNotifier {
       StreamController<TempSample>.broadcast();
   Stream<TempSample> get sampleStream => _sampleController.stream;
 
-  /// Rolling chart window (~3 minutes).
-  static const Duration chartWindow = Duration(minutes: 3);
+  /// Rolling chart window (last 5 minutes).
+  static const Duration chartWindow = Duration(minutes: 5);
   static const int maxSamples = 1200;
 
   BluetoothDevice? _device;
@@ -148,6 +148,11 @@ class BleController extends ChangeNotifier {
     } catch (_) {}
     await _scanSub?.cancel();
     _scanSub = null;
+    if (_status.connection == ConnectionStateUi.scanning) {
+      _setStatus(
+        _status.copyWith(connection: ConnectionStateUi.disconnected),
+      );
+    }
   }
 
   Future<void> connect(BluetoothDevice device) async {
