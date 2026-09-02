@@ -211,9 +211,18 @@ uint16_t rider_encode_debug_snapshot_frame(
     frame[33] = sensor_status;
     frame[34] = temperature_state;
     frame[35] = core_state;
-    frame[36] = freshness;
-    frame[37] = confidence;
-    frame[38] = model_mode;
+    /* v2：36..38 改为 M601 总线诊断（无串口时用 App/nRF 抓 hex 排障） */
+    {
+        rider_m601_diag_t m601_diag = {0};
+
+        rider_temp_copy_m601_diag(&m601_diag);
+        frame[36] = m601_diag.bus_flags;
+        frame[37] = m601_diag.fail_phase;
+        frame[38] = m601_diag.fail_streak;
+        (void)freshness;
+        (void)confidence;
+        (void)model_mode;
+    }
     frame[39] = model_version;
     frame[40] = heart_rate_used;
     return RIDER_TEMP_CODEC_DEBUG_FRAME_SIZE;

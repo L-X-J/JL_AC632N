@@ -34,7 +34,7 @@
 
 | 偏移 | 长度 | 字段 |
 |---:|---:|---|
-| 0 | 1 | `protocol_version`（当前 `1`） |
+| 0 | 1 | `protocol_version`（当前 **`2`**，含 M601 总线诊断） |
 | 1 | 1 | `flags` |
 | 2 | 4 | `sequence` uint32 |
 | 6 | 2 | `sensor_temperature_centi` int16（原始 Sensor） |
@@ -55,11 +55,37 @@
 | 33 | 1 | `sensor_status` |
 | 34 | 1 | `temperature_state` |
 | 35 | 1 | `core_state` |
-| 36 | 1 | `freshness` |
-| 37 | 1 | `confidence` |
-| 38 | 1 | `model_mode` |
+| 36 | 1 | `m601_bus_flags`（v2） |
+| 37 | 1 | `m601_fail_phase`（v2） |
+| 38 | 1 | `m601_fail_streak`（v2） |
 | 39 | 1 | `model_version` |
 | 40 | 1 | `heart_rate_used` |
+
+> v2 起 `@36..38` 让出原 `freshness` / `confidence` / `model_mode`，改为 **M601 1-Wire 诊断**（无串口时用 nRF/App 抓 hex 排障）。帧长仍为 41。
+
+### M601 诊断（`protocol_version >= 2`）
+
+`m601_bus_flags`：
+
+| bit | 含义 |
+|---:|---|
+| 0x01 | 最近一次 reset 检测到 presence（DQ 被拉低） |
+| 0x02 | reset 前 DQ 空闲为高（外部上拉看起来在） |
+
+`m601_fail_phase`：
+
+| 值 | 含义 |
+|---:|---|
+| 0 | OK / 无失败 |
+| 1 | CONVERT 前 reset 无 presence → 常见断线/脚错/没供电 |
+| 2 | READ 前 reset 无 presence |
+| 3 | CRC 错误 |
+| 4 | 温度超范围 |
+| 5 | 转换定时器创建失败 |
+
+`m601_fail_streak`：连续失败次数（饱和 255）。成功读温后清 0。
+
+排障读法：`@0==2` 且 `@33==1` 时看 `@37`：若为 `1` 再结合 `@36` 的 `0x02`（上拉）有无，优先查 PB7 接线。
 
 ### flags 位
 
@@ -81,6 +107,16 @@
 - 核心：`published_core_centi` @14
 
 温度单位：有符号百分之一摄氏度，例 `3675` → `36.75°C`。
+
+### sensor_status（@33，与驱动一致）
+
+| 值 | 含义 |
+|---:|---|
+| 0 | OK |
+| 1 | 无设备（presence 失败） |
+| 2 | CRC 错误 |
+| 3 | 超范围 |
+| 4 | 未佩戴 |
 
 ### 状态枚举（串口/调试一致）
 

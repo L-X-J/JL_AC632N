@@ -259,11 +259,32 @@ enum rider_ble_state {
     RIDER_BLE_STATE_CONNECTED = 2,
 };
 
+/* M601 1-Wire 诊断（经 0x2111 帧 @36..38 上报，便于无串口排障） */
+enum {
+    RIDER_M601_PHASE_OK = 0,
+    RIDER_M601_PHASE_NO_PRESENCE_CONVERT = 1, /* reset before CONVERT 无 presence */
+    RIDER_M601_PHASE_NO_PRESENCE_READ = 2,    /* reset before READ 无 presence */
+    RIDER_M601_PHASE_CRC = 3,
+    RIDER_M601_PHASE_RANGE = 4,
+    RIDER_M601_PHASE_TIMER = 5,               /* sys_timeout_add 失败 */
+};
+
+#define RIDER_M601_BUS_FLAG_PRESENCE   0x01 /* 最近一次 presence 为真 */
+#define RIDER_M601_BUS_FLAG_DQ_IDLE_HI 0x02 /* reset 前 DQ 空闲为高（上拉看起来在） */
+
+typedef struct {
+    uint8_t bus_flags;   /* RIDER_M601_BUS_FLAG_* */
+    uint8_t fail_phase;  /* RIDER_M601_PHASE_* */
+    uint8_t fail_streak; /* 连续失败次数，饱和 255 */
+} rider_m601_diag_t;
+
 void rider_temp_init(void);
 void rider_temp_stop(void);
 void rider_temp_start_conversion(void);
 uint32_t rider_temp_sequence(void);
 int rider_temp_copy_latest(rider_temperature_sample_t *sample);
+/** 拷贝最新 M601 总线诊断，供 BLE debug 帧编码。 */
+void rider_temp_copy_m601_diag(rider_m601_diag_t *diag);
 
 /** Reset the product-side filter and wear-state machine. */
 void rider_temp_filter_init(void);
@@ -303,6 +324,6 @@ int bt_comm_ble_hci_event_handler(struct bt_event *bt);
 #define RIDER_CORE_TEMP_NAME "ICXL-RTemp"
 #define RIDER_CORE_TEMP_MANUFACTURER "ICXL"
 #define RIDER_CORE_TEMP_MODEL "CoreTemp-Rider"
-#define RIDER_CORE_TEMP_FIRMWARE_VERSION "0.1.8"
+#define RIDER_CORE_TEMP_FIRMWARE_VERSION "0.1.9"
 
 #endif
