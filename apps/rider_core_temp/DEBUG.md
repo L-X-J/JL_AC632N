@@ -9,7 +9,7 @@
 | 项目 | 配置 |
 | --- | --- |
 | 芯片/板级 | AC632N / bd19 |
-| 输出引脚 | `PB5`（应用为 `IO_PORTB_05`，boot 配置为 `PB05`）；产品板 `PA0` 悬空不接 |
+| 输出引脚 | `PA0`（应用为 `IO_PORTA_00`，boot 配置为 `PA00`）；排障用芯片夹 |
 | 输入引脚 | 未启用（`NO_CONFIG_PORT`） |
 | 终端波特率 | `115200 baud` |
 | 帧格式 | 8 data bits, no parity, 1 stop bit（8N1） |
@@ -18,7 +18,7 @@
 
 板级 `debug_uart_init()` 调用预编译 SDK 的 `uart_init()`，不是 M601 的通信接口。M601 在本固件中由 `PB7` 独占 1-Wire 总线，不能把 PB7 当作串口脚位。
 
-Rider 的 boot/OTA 调试和应用日志统一复用 `PB5 / 115200`（新板未引出该脚，仅开发板排针看 log；产品板 `PA0` 悬空）。应用阶段由 `TCFG_UART0_TX_PORT`、`TCFG_UART0_BAUDRATE` 配置；boot/OTA 阶段由 `CONFIG_UBOOT_DEBUG_PIN`、`CONFIG_UBOOT_DEBUG_BAUD_RATE` 生成 `isd_config.ini` 中的 `UTTX=PB05`、`UTBD=115200`。两个阶段顺序运行，不会同时驱动 PB5。SDK 公共默认值仍可能是 `PA05 / 1000000`，但 Rider 板级配置必须覆盖它。
+Rider 的 boot/OTA 调试和应用日志统一复用 `PA0 / 115200`（排障配置，可用芯片夹夹 PA0）。应用阶段由 `TCFG_UART0_TX_PORT`、`TCFG_UART0_BAUDRATE` 配置；boot/OTA 阶段由 `CONFIG_UBOOT_DEBUG_PIN`、`CONFIG_UBOOT_DEBUG_BAUD_RATE` 生成 `isd_config.ini` 中的 `UTTX=PA00`、`UTBD=115200`。两个阶段顺序运行，不会同时驱动 PA0。SDK 公共默认值仍可能是 `PA05 / 1000000`，但 Rider 板级配置必须覆盖它。
 
 本目标使用 `DOWNLOAD_MODEL=USB`。`CONFIG_SERIAL_BAUD_RATE`、`CONFIG_LOADER_BAUD_RATE` 等下载通信默认值不属于这根应用日志线，也不需要为了查看日志而修改。
 
@@ -29,7 +29,7 @@ Rider 的 boot/OTA 调试和应用日志统一复用 `PB5 / 115200`（新板未�
 ### 接线
 
 ```text
-USB-UART RX  ->  AC632N PB5 / IO_PORTB_05
+USB-UART RX  ->  AC632N PA0 / IO_PORTA_00
 USB-UART GND ->  AC632N GND
 USB-UART TX  ->  不接（固件未启用 UART0 RX）
 ```
@@ -58,16 +58,16 @@ error       = (115384 - 115200) / 115200 = +0.16%
 
 截图状态栏已经显示 `115200 8N1` 和 `ASCII`，但接收内容仍是随机汉字、方框和符号。这不是 ASCII 开关或结束符设置造成的：ASCII 只决定终端如何显示已经收到的字节，不能修正发送端和接收端的波特率。截图里的 `结束符 None` 和“显示发送数据”也只作用于主机发送方向；当前固件未启用 UART0 RX，不会改变接收结果。
 
-旧镜像存在两种 `1000000 baud` 来源：旧应用从 `PA0` 输出，旧的 boot/OTA 默认配置从 `PA5` 输出。当前 Rider 配置已经把应用/boot 统一到 `PB5 / 115200`，因此 USB-UART 的 RX 只能接 `PB5`，不能接产品板悬空的 `PA0` 或旧 boot 口 `PA5`。用 `115200` 接收任何旧的 1000000-baud 镜像都会把每一帧错误采样成截图中的乱码。
+旧镜像存在两种 `1000000 baud` 来源：旧应用从 `PA0` 输出，旧的 boot/OTA 默认配置从 `PA5` 输出。当前 Rider 配置已经把应用/boot 统一到 `PA0 / 115200`，因此 USB-UART 的 RX 只能接 `PA0`，不能接旧的 `PB5`/`PA5`。用 `115200` 接收任何旧的 1000000-baud 镜像都会把每一帧错误采样成截图中的乱码。
 
 当前源码已经改为 `115200`，但源码修改不会改变板上正在运行的镜像。必须按以下顺序处理：
 
 1. 构建 `ac632n_rider_core_temp`。
 2. 将新生成的固件重新烧录到 AC632N。
 3. 重新打开串口，选择 `115200 / 8N1 / no flow control / ASCII`。
-4. 确认 USB-UART 的 `RX -> PB5`、`GND -> GND`；不要接产品板悬空的 `PA0` 或旧 boot 口 `PA5`，不要把 `RX` 接到 USB-UART 自己的 `TX`，也不要把 PB7 当作调试串口。
+4. 确认 USB-UART 的 `RX -> PA0`、`GND -> GND`；不要接旧过渡脚 `PB5` 或旧 boot 口 `PA5`，不要把 `RX` 接到 USB-UART 自己的 `TX`，也不要把 PB7 当作调试串口。
 
-重新烧录后，boot/OTA 和应用阶段都应在同一个 `115200` 终端中可读；应用日志应出现 `[Info]`、`[SETUP]`、`[RIDER_TEMP]` 或 `[RIDER_BOARD]` 等 ASCII 标签。若仍然是随机字节，先断电重启并确认实际烧录的是本次构建产物，再检查 RX/PB5、共地和 3.3 V TTL 电平；不要通过反复切换终端字符集来排查。
+重新烧录后，boot/OTA 和应用阶段都应在同一个 `115200` 终端中可读；应用日志应出现 `[Info]`、`[SETUP]`、`[RIDER_TEMP]` 或 `[RIDER_BOARD]` 等 ASCII 标签。若仍然是随机字节，先断电重启并确认实际烧录的是本次构建产物，再检查 RX/PA0、共地和 3.3 V TTL 电平；不要通过反复切换终端字符集来排查。
 
 ## 2. ASCII 日志约束
 
@@ -139,14 +139,14 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p 'test_*.py'
 ### 输出乱码
 
 1. 终端改为 `115200 / 8N1 / no flow control`。
-2. 确认 USB-UART 的 `RX` 接 PB5，而不是 PA0、旧 boot 口 PA5 或 USB-UART 的 TX。
+2. 确认 USB-UART 的 `RX` 接 PA0，而不是 PB5、旧 boot 口 PA5 或 USB-UART 的 TX。
 3. 确认开发板与转接器共地，并确认转接器为 3.3 V TTL 电平。
 4. 修改过波特率后重新执行构建和烧录；旧固件仍可能是之前的配置。
 
 ### 完全没有输出
 
 1. 检查 `TCFG_UART0_ENABLE` 是否为 `ENABLE_THIS_MOUDLE`。
-2. 检查 `TCFG_UART0_TX_PORT` 是否为 `IO_PORTB_05`，且 `CONFIG_UBOOT_DEBUG_PIN` 为 `PB05`。
+2. 检查 `TCFG_UART0_TX_PORT` 是否为 `IO_PORTA_00`，且 `CONFIG_UBOOT_DEBUG_PIN` 为 `PA00`。
 3. 不要等待 UART0 RX 回显；当前固件只启用 TX。
 4. 等待 M601 初始化和 BLE 生命周期日志；J12 诊断仍可通过 IOKey1/IOKey2 触发状态输出。
 

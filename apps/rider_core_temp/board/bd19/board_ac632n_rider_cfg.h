@@ -23,8 +23,8 @@
 //*********************************************************************************//
 #define TCFG_UART0_ENABLE					ENABLE_THIS_MOUDLE                     //串口打印模块使能
 #define TCFG_UART0_RX_PORT					NO_CONFIG_PORT                         //串口接收脚配置（用于打印可以选择NO_CONFIG_PORT）
-/* 产品板 PA0 悬空禁止占用；调试 UART0 TX 挂新板未引出的 PB5，仅开发板排针看 log */
-#define TCFG_UART0_TX_PORT  				IO_PORTB_05
+/* 排障临时：UART0 TX 回到 PA0，便于芯片夹夹取；量产可再改回悬空/他脚 */
+#define TCFG_UART0_TX_PORT  				IO_PORTA_00
 #define TCFG_UART0_BAUDRATE  				115200                                 //串口波特率配置
 
 //*********************************************************************************//
@@ -33,7 +33,7 @@
 /*
  * 新板脚位（产品已定）：
  *   KEY1=PA1（承接旧电源键业务）、KEY2=PA2（仅输入）、RED=PA7、BLUE=PA8、
- *   温感=PB7（M601/GTM601 1-Wire）、PA0 悬空禁止占用、USB DP/DN 不改。
+ *   温感=PB7（M601/GTM601 1-Wire）、调试串口=PA0（排障）、USB DP/DN 不改。
  * 旧开发板 J12 跳线映射见 docs/BOARD_PINOUT.md；量产改脚只动本文件宏。
  */
 #define RIDER_BOARD_DIAG_ENABLE              1
