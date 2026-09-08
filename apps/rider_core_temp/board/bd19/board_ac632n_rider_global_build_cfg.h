@@ -88,7 +88,7 @@
 //#define CONFIG_CUSTOM_CFG3_TYPE
 //#define CONFIG_CUSTOM_CFG3_VALUE
 
-//#define CONFIG_VDDIO_LVD_LEVEL                  4 ////VDDIO_LVD挡位，0: 1.55V   1: 1.70V   2: 1.85V   3: 2.00V   4: 2.15V   5: 2.30V   6: 2.45V   7: 2.60V
+#define CONFIG_VDDIO_LVD_LEVEL                  3 /* 2.00V；默认 2.15V 在 IO 跌落时会误复位 */
 
 //with single-bank mode,actual vm size should larger this VM_LEAST_SIZE,and dual bank mode,actual vm size equals this;
 #define CONFIG_VM_LEAST_SIZE                    8K

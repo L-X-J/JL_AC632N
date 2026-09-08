@@ -90,7 +90,8 @@ static void rider_1wire_release(void)
 {
     gpio_set_die(RIDER_M601_DQ_PORT, 1);
     gpio_set_pull_down(RIDER_M601_DQ_PORT, 0);
-    gpio_set_pull_up(RIDER_M601_DQ_PORT, 1);
+    /* 外部 4.7k 上拉即可；内部上拉会从 VDDIO 灌电流，LVD 时会把 IO 轨拉塌 */
+    gpio_set_pull_up(RIDER_M601_DQ_PORT, 0);
     gpio_direction_input(RIDER_M601_DQ_PORT);
 }
 
