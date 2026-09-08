@@ -50,6 +50,18 @@ static void rider_delay_us(u32 usec)
     }
 }
 
+/* 1-Wire bit-bang 时隙约数十微秒，BLE 中断会把时隙拉长导致 CRC。
+ * 仅在总线复位/读写字节期间关中断；CONVERT 的 15ms 等待仍走 sys_timeout。 */
+static void rider_1wire_lock(void)
+{
+    local_irq_disable();
+}
+
+static void rider_1wire_unlock(void)
+{
+    local_irq_enable();
+}
+
 static rider_temperature_sample_t rider_latest_sample;
 static rider_m601_diag_t rider_m601_diag;
 static u16 rider_conversion_timeout;
@@ -94,6 +106,7 @@ static u8 rider_1wire_reset_presence(void)
     u8 present;
     u8 dq_idle_high;
 
+    rider_1wire_lock();
     /* 采样 reset 前空闲电平：有外部上拉时通常为高 */
     rider_1wire_release();
     dq_idle_high = (gpio_read(RIDER_M601_DQ_PORT) != 0);
@@ -114,12 +127,14 @@ static u8 rider_1wire_reset_presence(void)
         rider_m601_diag.bus_flags &= (u8)~RIDER_M601_BUS_FLAG_PRESENCE;
     }
     rider_delay_us(410);
+    rider_1wire_unlock();
     return present;
 }
 
 /** Write one 1-Wire time slot, least significant bit first. */
 static void rider_1wire_write_bit(u8 value)
 {
+    rider_1wire_lock();
     rider_1wire_drive_low();
     if (value) {
         rider_delay_us(2);
@@ -130,6 +145,7 @@ static void rider_1wire_write_bit(u8 value)
         rider_1wire_release();
         rider_delay_us(10);
     }
+    rider_1wire_unlock();
 }
 
 /** Read one 1-Wire time slot at the timing used by the supplied sample. */
@@ -137,12 +153,14 @@ static u8 rider_1wire_read_bit(void)
 {
     u8 value;
 
+    rider_1wire_lock();
     rider_1wire_drive_low();
     rider_delay_us(2);
     rider_1wire_release();
     rider_delay_us(10);
     value = (u8)(gpio_read(RIDER_M601_DQ_PORT) != 0);
     rider_delay_us(58);
+    rider_1wire_unlock();
     return value;
 }
 
@@ -269,6 +287,17 @@ static void rider_m601_complete_conversion(void *priv)
     }
 
     status = rider_m601_decode(scratchpad, &temperature_centi);
+    /* CRC 失败再读一次暂存器，规避偶发时隙被拉长 */
+    if (status == RIDER_TEMP_STATUS_CRC_ERROR) {
+        if (rider_1wire_reset_presence()) {
+            rider_1wire_write_byte(0xcc);
+            rider_1wire_write_byte(0xbe);
+            for (index = 0; index < RIDER_M601_SCRATCHPAD_SIZE; ++index) {
+                scratchpad[index] = rider_1wire_read_byte();
+            }
+            status = rider_m601_decode(scratchpad, &temperature_centi);
+        }
+    }
     rider_latest_sample.sequence++;
     rider_latest_sample.status = (u8)status;
     rider_latest_sample.valid = (status == RIDER_TEMP_STATUS_OK);
