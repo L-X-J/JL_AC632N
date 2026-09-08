@@ -52,7 +52,7 @@ void app_var_init(void)
     app_var.auto_off_time = 0;
     app_var.warning_tone_v = 340;
     app_var.poweroff_tone_v = 330;
-    app_var.rf_power = 10;
+    app_var.rf_power = 6; /* 降低 TX 峰值，减轻 VDDIO 跌落 */
 }
 
 /** Start the one BLE peripheral stack used by the Rider product. */
