@@ -6,6 +6,7 @@
 
 static u16 rider_sample_timer_id;
 static uint32_t rider_consumed_sequence;
+static u8 rider_sensor_powered;
 
 /** Complete the previous conversion, queue the next one, then publish BLE. */
 static void rider_core_temp_scheduler(void *priv)
@@ -31,11 +32,13 @@ void rider_core_temp_start_scheduler(void)
         return;
     }
 
-    /* The application owns the sensor/estimator lifetime so a restart cannot
-     * publish a snapshot left over from a previous BLE session. */
-    rider_temp_init();
-    rider_estimator_init();
-    rider_consumed_sequence = rider_temp_sequence();
+    /* 滤波/核心预热只在上电初始化一次，BLE 重连不得清掉可信皮温。 */
+    if (!rider_sensor_powered) {
+        rider_temp_init();
+        rider_estimator_init();
+        rider_consumed_sequence = rider_temp_sequence();
+        rider_sensor_powered = 1;
+    }
     rider_temp_start_conversion();
     rider_sample_timer_id = sys_timer_add(NULL, rider_core_temp_scheduler, 1000);
 }

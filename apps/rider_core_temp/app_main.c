@@ -81,6 +81,7 @@ static void rider_app_stop(void)
         return;
     }
 
+    rider_core_temp_stop_scheduler();
     btstack_ble_exit(0);
     rider_btstack_started = 0;
 }
