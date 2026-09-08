@@ -50,8 +50,9 @@ static void rider_delay_us(u32 usec)
     }
 }
 
-/* 1-Wire bit-bang 时隙约数十微秒，BLE 中断会把时隙拉长导致 CRC。
- * 仅在总线复位/读写字节期间关中断；CONVERT 的 15ms 等待仍走 sys_timeout。 */
+/* 1-Wire 采样窗必须关中断，否则 BLE 会把时隙拉长导致 CRC。
+ * 只锁边沿/采样（约十几微秒）；复位 480us 拉低和时隙恢复期开中断，并喂狗，
+ * 避免饿死 BT 控制器 / 看门狗。CONVERT 的 15ms 仍走 sys_timeout。 */
 static void rider_1wire_lock(void)
 {
     local_irq_disable();
@@ -60,6 +61,7 @@ static void rider_1wire_lock(void)
 static void rider_1wire_unlock(void)
 {
     local_irq_enable();
+    clr_wdt();
 }
 
 static rider_temperature_sample_t rider_latest_sample;
@@ -106,8 +108,7 @@ static u8 rider_1wire_reset_presence(void)
     u8 present;
     u8 dq_idle_high;
 
-    rider_1wire_lock();
-    /* 采样 reset 前空闲电平：有外部上拉时通常为高 */
+    /* 空闲电平和 480us 复位脉冲允许中断；只锁 presence 采样窗 */
     rider_1wire_release();
     dq_idle_high = (gpio_read(RIDER_M601_DQ_PORT) != 0);
     if (dq_idle_high) {
@@ -118,16 +119,18 @@ static u8 rider_1wire_reset_presence(void)
 
     rider_1wire_drive_low();
     rider_delay_us(480);
+    clr_wdt();
+    rider_1wire_lock();
     rider_1wire_release();
     rider_delay_us(70);
     present = (gpio_read(RIDER_M601_DQ_PORT) == 0);
+    rider_1wire_unlock();
     if (present) {
         rider_m601_diag.bus_flags |= RIDER_M601_BUS_FLAG_PRESENCE;
     } else {
         rider_m601_diag.bus_flags &= (u8)~RIDER_M601_BUS_FLAG_PRESENCE;
     }
     rider_delay_us(410);
-    rider_1wire_unlock();
     return present;
 }
 
@@ -139,13 +142,14 @@ static void rider_1wire_write_bit(u8 value)
     if (value) {
         rider_delay_us(2);
         rider_1wire_release();
+        rider_1wire_unlock();
         rider_delay_us(68);
     } else {
         rider_delay_us(60);
         rider_1wire_release();
+        rider_1wire_unlock();
         rider_delay_us(10);
     }
-    rider_1wire_unlock();
 }
 
 /** Read one 1-Wire time slot at the timing used by the supplied sample. */
@@ -159,8 +163,8 @@ static u8 rider_1wire_read_bit(void)
     rider_1wire_release();
     rider_delay_us(10);
     value = (u8)(gpio_read(RIDER_M601_DQ_PORT) != 0);
-    rider_delay_us(58);
     rider_1wire_unlock();
+    rider_delay_us(58);
     return value;
 }
 

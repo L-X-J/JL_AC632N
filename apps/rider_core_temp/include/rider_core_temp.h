@@ -86,13 +86,13 @@ enum rider_temperature_freshness {
 /* Filter parameters are bring-up defaults for the fixed chest-strap probe.
  * Five samples fill the robust median window; they never qualify skin or core
  * by themselves.  Thirty contiguous valid samples establish trusted skin.
- * The 32~40 C band is only typical-contact evidence and detach recovery, not
+ * The 33.5~41 C band is typical-contact evidence and detach recovery, not
  * a physiological validity range. */
 #define RIDER_TEMP_FILTER_MEDIAN_SAMPLES     5
 #define RIDER_TEMP_FILTER_TRUSTED_SAMPLES    30
 #define RIDER_TEMP_FILTER_TYPICAL_SAMPLES    5
-#define RIDER_TEMP_FILTER_TYPICAL_MIN_CENTI  3200
-#define RIDER_TEMP_FILTER_TYPICAL_MAX_CENTI  4000
+#define RIDER_TEMP_FILTER_TYPICAL_MIN_CENTI  3350
+#define RIDER_TEMP_FILTER_TYPICAL_MAX_CENTI  4100
 /* Deprecated parameter aliases retained for out-of-tree host tests. */
 #define RIDER_TEMP_FILTER_STABLE_SAMPLES RIDER_TEMP_FILTER_TRUSTED_SAMPLES
 #define RIDER_TEMP_FILTER_NORMAL_SAMPLES RIDER_TEMP_FILTER_TYPICAL_SAMPLES
@@ -324,6 +324,6 @@ int bt_comm_ble_hci_event_handler(struct bt_event *bt);
 #define RIDER_CORE_TEMP_NAME "ICXL-RTemp"
 #define RIDER_CORE_TEMP_MANUFACTURER "ICXL"
 #define RIDER_CORE_TEMP_MODEL "CoreTemp-Rider"
-#define RIDER_CORE_TEMP_FIRMWARE_VERSION "0.1.11"
+#define RIDER_CORE_TEMP_FIRMWARE_VERSION "0.1.12"
 
 #endif

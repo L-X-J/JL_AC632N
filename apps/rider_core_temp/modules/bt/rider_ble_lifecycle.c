@@ -84,19 +84,17 @@ void bt_ble_before_start_init(void)
 /** Reset sensor state before constructing any profile or advertisement data. */
 void bt_ble_init(void)
 {
-    /* The scheduler owns sensor/estimator initialization.  It must run first
-     * so a BLE restart cannot advertise a snapshot from the prior session. */
+    /* 采样与滤波跟 BLE 会话解耦：协议栈起来只保证定时器在跑，不清预热。 */
     rider_core_temp_start_scheduler();
     rider_core_temp_gatt_init();
     ble_module_enable(1);
     rider_board_diag_init();
 }
 
-/** Stop sampling before disabling and releasing the GATT common module. */
+/** 拆除 GATT 时不停采样、不清滤波，避免重连重新预热。 */
 void bt_ble_exit(void)
 {
     rider_board_diag_stop();
-    rider_core_temp_stop_scheduler();
     ble_module_enable(0);
     rider_core_temp_gatt_exit();
 }
