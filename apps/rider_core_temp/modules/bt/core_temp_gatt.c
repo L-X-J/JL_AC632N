@@ -334,10 +334,15 @@ static void rider_request_can_send_now(u16 connection_handle)
     }
 }
 
-/** Convert the AC632N VBAT monitor into the protocol's 0..100 percentage. */
-static u8 rider_get_battery_level(void)
+/** 读 VBAT 毫伏：AC632N AD_CH_VBAT 为 1/4 分压。 */
+static u32 rider_get_battery_mv(void)
 {
-    u32 battery_mv = adc_get_voltage(AD_CH_VBAT) * 4;
+    return adc_get_voltage(AD_CH_VBAT) * 4;
+}
+
+/** 3.6V 锂电：3.30V=0%，>=4.20V=100%。走标准 0x2A19。 */
+static u8 rider_battery_percent_from_mv(u32 battery_mv)
+{
     u32 span_mv = RIDER_BATTERY_FULL_MV - RIDER_BATTERY_EMPTY_MV;
 
     if (battery_mv <= RIDER_BATTERY_EMPTY_MV) {
@@ -350,11 +355,21 @@ static u8 rider_get_battery_level(void)
                 span_mv);
 }
 
+static u8 rider_get_battery_level(void)
+{
+    return rider_battery_percent_from_mv(rider_get_battery_mv());
+}
+
 /** Notify a subscribed client only after a measured percentage changes. */
 static void rider_refresh_battery(void)
 {
-    u8 battery_level = rider_get_battery_level();
+    u32 battery_mv = rider_get_battery_mv();
+    u8 battery_level = rider_battery_percent_from_mv(battery_mv);
     int result;
+
+    log_info("Battery: %u mV %u%% (empty=%u full=%u)\n",
+             (unsigned)battery_mv, (unsigned)battery_level,
+             (unsigned)RIDER_BATTERY_EMPTY_MV, (unsigned)RIDER_BATTERY_FULL_MV);
 
     if (rider_battery_level_valid && battery_level == rider_last_battery_level) {
         return;

@@ -7,7 +7,8 @@
 - 调试快照帧固定 **41 字节**。默认 ATT MTU 不够：连上后先 `requestMtu`（≥44，建议 247），再写 CCCD 打开 Notify。
 - 温度无效哨兵：`0x7FFF`（int16）。
 - 板级按键（PB3 电源 / J12 IOKey）**目前不走 BLE**，App 状态面板先占位。
-- 电量 `0x180F / 0x2A19`：当前为 AC632N `AD_CH_VBAT` 电压估算（非独立 fuel-gauge），可当占位。
+- 电量 `0x180F / 0x2A19`：`AD_CH_VBAT` 线性估算，**3.30V=0%、≥4.20V=100%**（3.6V 锂电，充电 4.2V 视为满电）。无独立 fuel-gauge。
+- 核心预热：可信皮温后 `core_history_seconds` 满 **60s** 才发布核心温（`core_state` 1→2）。
 
 ## GATT 一览
 
