@@ -381,8 +381,8 @@
 //                                  系统配置                                         //
 //*********************************************************************************//
 #define TCFG_AUTO_SHUT_DOWN_TIME		          0   //没有蓝牙连接自动关机时间
-#define RIDER_BATTERY_EMPTY_MV                     3300   //VBAT voltage mapped to 0 percent
-#define RIDER_BATTERY_FULL_MV                      4220   //VBAT voltage mapped to 100 percent
+#define RIDER_BATTERY_EMPTY_MV                     3300   // 3.6V 锂电空电（截止附近）
+#define RIDER_BATTERY_FULL_MV                      4200   // 充电电压 >=4.2V 视为满电
 #if (TCFG_LOWPOWER_POWER_SEL == PWR_DCDC15)
 #define TCFG_SYS_LVD_EN						      1   //dcdc模式电压低于2.4v的时候切为LDO模式，需要开启电量检测
 #else

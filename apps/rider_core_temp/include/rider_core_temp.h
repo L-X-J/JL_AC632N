@@ -157,9 +157,8 @@ enum rider_temperature_freshness {
 #ifndef RIDER_CORE_TEMP_CAL_LAG_ALPHA_Q8
 #define RIDER_CORE_TEMP_CAL_LAG_ALPHA_Q8     8
 #endif
-/* V1 uses five-second history points for minute-scale features. Sixty-one
- * points cover both endpoints of a full five-minute interval; skin, sequence,
- * optional HR and bookkeeping consume about 512 bytes. */
+/* V1 uses five-second history points. Thirteen slots cover both endpoints
+ * of a one-minute core-warmup window. */
 #define RIDER_CORE_TEMP_MODEL_VERSION         1
 #ifndef RIDER_CORE_TEMP_CAL_MODEL_VERSION
 #define RIDER_CORE_TEMP_CAL_MODEL_VERSION     0
@@ -169,8 +168,8 @@ enum rider_temperature_freshness {
 #error "Rider core calibration model version does not match firmware"
 #endif
 #define RIDER_CORE_TEMP_HISTORY_STEP_SECONDS  5
-#define RIDER_CORE_TEMP_HISTORY_SECONDS       300
-#define RIDER_CORE_TEMP_HISTORY_SLOTS         61
+#define RIDER_CORE_TEMP_HISTORY_SECONDS       60
+#define RIDER_CORE_TEMP_HISTORY_SLOTS         13
 #define RIDER_CORE_TEMP_BASELINE_SAMPLES      30
 #define RIDER_CORE_TEMP_SKIN_REFERENCE_CENTI  3500
 #define RIDER_CORE_TEMP_HR_REFERENCE_BPM      80
@@ -324,6 +323,6 @@ int bt_comm_ble_hci_event_handler(struct bt_event *bt);
 #define RIDER_CORE_TEMP_NAME "ICXL-RTemp"
 #define RIDER_CORE_TEMP_MANUFACTURER "ICXL"
 #define RIDER_CORE_TEMP_MODEL "CoreTemp-Rider"
-#define RIDER_CORE_TEMP_FIRMWARE_VERSION "0.1.14"
+#define RIDER_CORE_TEMP_FIRMWARE_VERSION "0.1.15"
 
 #endif
